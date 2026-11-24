@@ -4,7 +4,7 @@ import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Regist
 import type { ArtifactRow, Artifacts, Band, Observed, Summary, SummaryCache, Tab, Thread, Todo } from '../types'
 import {
   demoArtifacts, demoObserved, demoSummary, emptyObserved, hash, isTestCommand, onAgent, onArtifact, onCommit, onEdit,
-  isEngineText, onError, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, short, snippet, stamp, testResult, SUMMARY_SYSTEM, summaryInput,
+  dropEngineText, isEngineText, onError, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, short, snippet, stamp, testResult, SUMMARY_SYSTEM, summaryInput,
   summaryPrompt, SUMMARY_OUT,
 } from './observe'
 
@@ -80,6 +80,7 @@ export const register: Register = on => {
       argumentHint: '[open|threads|summary|artifacts|all|close|min|demo|live]',
     })
     if ((await $.env.get('WHATCHA_DEMO')) === '1') await update($, demo, () => true)
+    await update($, observed, dropEngineText).catch(() => {})
     // Artifacts outlive the session: one store key per project folder.
     const key = `artifacts:${e.cwd}`
     const rows = ((await $.store.get(key).catch(() => undefined)) as ArtifactRow[] | undefined) ?? []

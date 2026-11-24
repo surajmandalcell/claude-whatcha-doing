@@ -33,6 +33,17 @@ const ancestors = (o: Observed, id: number): Thread[] => {
 export const isEngineText = (text: string) =>
   /^\s*<(task-notification|system-reminder|local-command-[a-z]+|command-(name|message|args)|bash-(input|stdout|stderr))\b/.test(text)
 
+/** Repairs state saved before 1.0.6: drops engine prompts and retitles their threads from the first real prompt. */
+export function dropEngineText(o: Observed): Observed {
+  const log = o.log.filter(a => !(a.kind === 'prompt' && isEngineText(a.text)))
+  const threads = o.threads.map(t => {
+    if (!isEngineText(t.title)) return t
+    const p = log.find(a => a.kind === 'prompt' && a.thread === t.id)
+    return p ? { ...t, title: short(titleOf(p.text)) } : t
+  })
+  return { ...o, log, threads }
+}
+
 const SKIP = new Set('a an the to in on of for and or this that it is be my me please just would could can you'.split(' '))
 const words = (s: string) => s.toLowerCase().split(/[^a-z0-9.]+/).filter(w => w && !SKIP.has(w))
 /** First ~6 meaningful words of the first clause, without the cue ("wait, unrelated:"). */
@@ -149,7 +160,8 @@ export const onError = (o: Observed, tool: string, text: string) => log(o, 'erro
 export const onAgent = (o: Observed, what: string) => log(o, 'agent', `helper: ${short(what, 60)}`)
 /** `git commit -m "msg"`: the message, else the command. */
 export const onCommit = (o: Observed, cmd: string) => log(o, 'commit', `commit: ${short(cmd.match(/-m\s+(["'])(.*?)\1/)?.[2] ?? cmd, 60)}`)
-export const isTestCommand = (cmd: string) => /\b(test|jest|vitest|pytest|cargo test|go test|tsc|lint)\b/.test(cmd)
+// The tool word must stand alone as a command word, so a path such as tests/tax.test.ts is not a test run.
+export const isTestCommand = (cmd: string) => /(^|[\s;&|(])(test|jest|vitest|pytest|tsc|lint|eslint)(?=$|[\s;&|)])/.test(cmd)
 
 /** The owner's budget per Haiku call (spec): input and output tokens. */
 export const SUMMARY_IN = 600

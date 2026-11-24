@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { DEMO_REPLY, demoObserved, parseSummary, short, snippet, SUMMARY_SYSTEM, summaryInput, summaryPrompt, titleOf, isEngineText } from '../hooks/observe'
+import { DEMO_REPLY, demoObserved, parseSummary, short, snippet, SUMMARY_SYSTEM, summaryInput, summaryPrompt, titleOf, isEngineText, dropEngineText, isTestCommand } from '../hooks/observe'
 import { bodyCap, safeHref } from '../hooks/register'
 
 test('only clean https URLs become links', () => {
@@ -248,6 +248,12 @@ test('prompt line: the owner\'s words, cut at a word near 80 chars', () => {
   // A title keeps the whole first clause (the row cuts it at its width) and drops pasted-image tags.
   expect(isEngineText('<task-notification>\n<task-id>a1</task-id>')).toBe(true)
   expect(isEngineText('fix the <div> in header')).toBe(false)
+  const fixed = dropEngineText({
+    current: 1, threads: [{ id: 1, title: '<task-notification>', state: 'active', todos: [], files: [] }],
+    log: [{ kind: 'prompt', text: '<task-notification> <task-id>a1', thread: 1 }, { kind: 'prompt', text: 'make the output better', thread: 1 }],
+  })
+  expect([fixed.threads[0]!.title, fixed.log.length]).toEqual(['Make output better', 1])
+  expect([isTestCommand('npm test'), isTestCommand('claude plugin test .'), isTestCommand('sed -n 1p tests/tax.test.ts')]).toEqual([true, true, false])
   expect(titleOf('[Image #1] here reduce padding, its not using the full width. thanks'))
     .toBe('Here reduce padding, its not using full width')
 })
