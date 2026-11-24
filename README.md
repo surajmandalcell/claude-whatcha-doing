@@ -22,7 +22,7 @@ is which. whatcha-doing shows, at a glance, what you asked each session, what it
 | | |
 |---|---|
 | ![Collapsed status row](docs/collapsed.png) | ![Summary board](docs/summary.png) |
-| **Status row.** By default the band is one row: the thread you are on now, how many threads are done, and an estimate. | **Summary.** One Haiku call sorts the tasks into Done, Active, Stuck and Left, each with a one-line note. |
+| **Status row.** By default the band is one row: the thread you are on now, how many threads are done and, once you open Summary, a percent-done estimate. | **Summary.** One Haiku call sorts the tasks into Done, Active, Stuck and Left, each with a one-line note. |
 | ![Artifacts list](docs/artifacts.png) | ![Minimized band](docs/minimized.png) |
 | **Artifacts.** The pages this project published, newest change first. A click on the name copies the link; the link opens on click. | **Minimized.** `▾` shrinks the band to `▴ @whatcha-doing` on the right. |
 | ![Show all](docs/show-all.png) | |
