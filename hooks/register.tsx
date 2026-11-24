@@ -103,8 +103,8 @@ export const register: Register = on => {
       await update($, band, (x): Band => ({ ...x, mode: 'expanded', all: false }))
       if ((await read($, tabAtom)) === 'summary') await showSummary(io)
     }
-    const b = await read($, band)
-    return { text: `Whatcha doing: ${b.mode}${(await read($, demo)) ? ', sample data' : ''}.` }
+    // The band itself shows the result: an output line per command only stacked noise above it.
+    return {}
   })
 
   on('prompt.submit', async ($, e, next) => {
