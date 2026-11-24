@@ -33,8 +33,10 @@ const SKIP = new Set('a an the to in on of for and or this that it is be my me p
 const words = (s: string) => s.toLowerCase().split(/[^a-z0-9.]+/).filter(w => w && !SKIP.has(w))
 /** First ~6 meaningful words of the first clause, without the cue ("wait, unrelated:"). */
 export function titleOf(text: string): string {
-  const w = text.replace(CUE, '').split(/[:?!\n]|\.\s/)[0]!.split(/\s+/).filter(x => x && !SKIP.has(x.toLowerCase()))
-  const t = w.slice(0, 6).join(' ')
+  // Pasted images and text are noise in a title; the row cuts at the real width, so keep the whole first clause.
+  const plain = text.replace(/\[(Image|Pasted text) #\d+[^\]]*\]/g, ' ').replace(CUE, '')
+  const w = plain.split(/[:?!\n]|\.\s/)[0]!.split(/\s+/).filter(x => x && !SKIP.has(x.toLowerCase()))
+  const t = w.slice(0, 24).join(' ')
   return t ? t[0]!.toUpperCase() + t.slice(1) : short(text)
 }
 const CUE = /^\s*((ok(ay)?|so)[,\s]+)?((wait|btw|by the way|side question|quick question|unrelated|new thing|also|next|back to [^:,.]*|go(ing)? back( to [^:,.]*)?)\b[,:\s-]*)*/i

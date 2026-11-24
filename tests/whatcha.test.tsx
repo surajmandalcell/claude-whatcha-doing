@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { DEMO_REPLY, demoObserved, parseSummary, short, snippet, SUMMARY_SYSTEM, summaryInput, summaryPrompt } from '../hooks/observe'
+import { DEMO_REPLY, demoObserved, parseSummary, short, snippet, SUMMARY_SYSTEM, summaryInput, summaryPrompt, titleOf } from '../hooks/observe'
 import { bodyCap, safeHref } from '../hooks/register'
 
 test('only clean https URLs become links', () => {
@@ -245,6 +245,9 @@ test('prompt line: the owner\'s words, cut at a word near 80 chars', () => {
   expect(snippet('fix the   login\nbug')).toBe('fix the login bug')
   expect(snippet('wait, unrelated: why would the CI workflow fail on this repo? just look, short answer'))
     .toBe('wait, unrelated: why would the CI workflow fail on this repo? just look, short…')
+  // A title keeps the whole first clause (the row cuts it at its width) and drops pasted-image tags.
+  expect(titleOf('[Image #1] here reduce padding, its not using the full width. thanks'))
+    .toBe('Here reduce padding, its not using full width')
 })
 
 // A real session (5 prompts) replayed with its tool calls and results, taken from its transcript.
