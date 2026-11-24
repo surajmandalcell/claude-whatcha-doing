@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { DEMO_REPLY, demoObserved, parseSummary, short, snippet, SUMMARY_SYSTEM, summaryInput, summaryPrompt, titleOf, isEngineText, dropEngineText, isTestCommand } from '../hooks/observe'
+import { DEMO_REPLY, demoObserved, parseSummary, short, snippet, SUMMARY_SYSTEM, summaryInput, summaryPrompt, titleOf, isEngineText, dropEngineText, isTestCommand, noticeOf, onNotice } from '../hooks/observe'
 import { bodyCap, safeHref } from '../hooks/register'
 
 test('only clean https URLs become links', () => {
@@ -252,9 +252,20 @@ test('prompt line: the owner\'s words, cut at a word near 80 chars', () => {
   expect(isEngineText('fix the <div> in header')).toBe(false)
   const fixed = dropEngineText({
     current: 1, threads: [{ id: 1, title: '<task-notification>', state: 'active', todos: [], files: [] }],
-    log: [{ kind: 'prompt', text: '<task-notification> <task-id>a1', thread: 1 }, { kind: 'prompt', text: 'make the output better', thread: 1 }],
+    log: [
+      { kind: 'prompt', text: '<task-notification> <task-id>a1', thread: 1 },
+      { kind: 'prompt', text: 'make the output better', thread: 1 },
+      { kind: 'test', text: 'tests pass: sed -n 1,10p hooks/register.tsx', thread: 1 },
+    ],
   })
-  expect([fixed.threads[0]!.title, fixed.log.length]).toEqual(['Make output better', 1])
+  expect(fixed.threads[0]!.title).toBe('Make output better')
+  expect(fixed.log.map(a => `${a.kind} ${a.text}`)).toEqual(['agent A background task finished', 'prompt make the output better'])
+  // A task report reads as plain words in the current thread, not as a prompt or a thread of its own.
+  const report = '<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Agent "Cover page" finished</summary>\n</task-notification>'
+  expect(noticeOf(report)).toBe('Agent "Cover page" finished')
+  expect(noticeOf('fix the tax')).toBeUndefined()
+  const step = onNotice(fixed, noticeOf(report)!)
+  expect([step.threads.length, step.log.at(-1)!.kind, step.log.at(-1)!.text]).toEqual([1, 'agent', 'Agent "Cover page" finished'])
   expect([isTestCommand('npm test'), isTestCommand('claude plugin test .'), isTestCommand('sed -n 1p tests/tax.test.ts')]).toEqual([true, true, false])
   expect(titleOf('[Image #1] here reduce padding, its not using the full width. thanks'))
     .toBe('Here reduce padding, its not using full width')

@@ -4,7 +4,7 @@ import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Regist
 import type { ArtifactRow, Artifacts, Band, Observed, Summary, SummaryCache, Tab, Thread, Todo } from '../types'
 import {
   demoArtifacts, demoObserved, demoSummary, emptyObserved, hash, isTestCommand, onAgent, onArtifact, onCommit, onEdit,
-  dropEngineText, isEngineText, onError, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, short, snippet, stamp, testResult, SUMMARY_SYSTEM, summaryInput,
+  dropEngineText, isEngineText, noticeOf, onNotice, onError, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, short, snippet, stamp, testResult, SUMMARY_SYSTEM, summaryInput,
   summaryPrompt, SUMMARY_OUT,
 } from './observe'
 
@@ -109,9 +109,10 @@ export const register: Register = on => {
   })
 
   on('prompt.submit', async ($, e, next) => {
-    if (!e.command && !e.isMeta && !isEngineText(e.text)) {
+    const notice = noticeOf(e.text)
+    if (notice || (!e.command && !e.isMeta && !isEngineText(e.text))) {
       const at = await $.clock.now()
-      await update($, observed, o => stamp(onPrompt(o, e.text), at))
+      await update($, observed, o => stamp(notice ? onNotice(o, notice) : onPrompt(o, e.text), at))
     }
     return next(e)
   })

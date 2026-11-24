@@ -33,13 +33,31 @@ const ancestors = (o: Observed, id: number): Thread[] => {
 export const isEngineText = (text: string) =>
   /^\s*<(task-notification|system-reminder|local-command-[a-z]+|command-(name|message|args)|bash-(input|stdout|stderr))\b/.test(text)
 
-/** Repairs state saved before 1.0.6: drops engine prompts and retitles their threads from the first real prompt. */
+/** A background task's report in plain words, from its <summary> tag: `Agent "Cover page" finished`. */
+export function noticeOf(text: string): string | undefined {
+  if (!/^\s*<task-notification\b/.test(text)) return
+  return /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim() || 'A background task finished'
+}
+
+/** A background task's report is a step of the current thread, never a prompt. */
+export function onNotice(o: Observed, text: string): Observed {
+  return log(cur(o) ? o : open(o, text), 'agent', short(text, 80))
+}
+
+/**
+ * Repairs state saved before 1.0.9: task reports saved as prompts become plain report steps, other engine
+ * prompts go, threads named after them take their first real prompt, and reads like `sed … tests/x.test.ts` stop
+ * counting as test runs.
+ */
 export function dropEngineText(o: Observed): Observed {
-  const log = o.log.filter(a => !(a.kind === 'prompt' && isEngineText(a.text)))
+  const log = o.log
+    .filter(a => !(a.kind === 'prompt' && isEngineText(a.text) && !noticeOf(a.text)))
+    .filter(a => !(a.kind === 'test' && /^tests (pass|fail): (sed|grep|rg|git|cat|ls|head|tail)\b/.test(a.text)))
+    .map(a => (a.kind === 'prompt' && noticeOf(a.text) ? { ...a, kind: 'agent' as const, text: noticeOf(a.text)! } : a))
   const threads = o.threads.map(t => {
     if (!isEngineText(t.title)) return t
     const p = log.find(a => a.kind === 'prompt' && a.thread === t.id)
-    return p ? { ...t, title: short(titleOf(p.text)) } : t
+    return { ...t, title: p ? short(titleOf(p.text)) : 'Background tasks' }
   })
   return { ...o, log, threads }
 }
