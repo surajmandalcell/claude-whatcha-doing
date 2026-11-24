@@ -205,22 +205,21 @@ export function hash(s: string): string {
   return (h >>> 0).toString(36)
 }
 
-const S = 'src/settings/'
 const MIN = 60_000
 /** The sample session, its times counted back from `now`. */
 export const demoObserved = (now: number): Observed => ({
   current: 4,
   threads: [
     {
-      id: 1, title: 'Add dark mode to Settings', state: 'paused',
-      prompt: 'add dark mode to Settings: a theme toggle, and move the hard-coded colors in Settings.tsx to theme tokens',
+      id: 1, title: 'Fix checkout tax rounding', state: 'paused',
+      prompt: 'the tax on a $10 mug shows $0.82, it should be $0.83. fix the rounding in src/checkout/tax.ts and run the tests',
       startedAt: now - 130 * MIN, lastAt: now - 25 * MIN,
       todos: [
-        { text: 'Add a theme toggle to Settings', status: 'completed' },
-        { text: 'Move colors to theme tokens', status: 'in_progress' },
-        { text: 'Update the Settings snapshot', status: 'blocked' },
+        { text: 'Round tax per line to the cent', status: 'completed' },
+        { text: 'Fix the two failing tax tests', status: 'in_progress' },
+        { text: 'Update the receipt snapshot', status: 'blocked' },
       ],
-      files: [`${S}Settings.tsx`, 'src/theme/tokens.ts', `${S}Settings.test.tsx`],
+      files: ['src/checkout/tax.ts', 'test/tax.test.ts', 'test/receipt.test.ts'],
     },
     {
       id: 2, title: 'Why is CI red?', parent: 1, state: 'answered', todos: [], files: [],
@@ -235,37 +234,37 @@ export const demoObserved = (now: number): Observed => ({
       files: ['.github/workflows/ci.yml', '.nvmrc', 'package.json'],
     },
     {
-      id: 4, title: 'Write release notes', state: 'active',
-      prompt: 'ok, now write the release notes for v2.4 in CHANGELOG.md from the PRs merged since v2.3, grouped by feature and fix',
+      id: 4, title: 'Show tax on each cart line', state: 'active',
+      prompt: 'next, show the tax on each cart line in src/cart/CartTable.ts, formatted with formatMoney, and add a test',
       startedAt: now - 18 * MIN, lastAt: now - 2 * MIN,
       todos: [
-        { text: 'Collect merged PRs since v2.3', status: 'in_progress' },
-        { text: 'Draft the notes', status: 'pending' },
-        { text: 'Ask for a review', status: 'pending' },
+        { text: 'Add a tax column to CartTable', status: 'in_progress' },
+        { text: 'Format it with formatMoney', status: 'pending' },
+        { text: 'Add a cart table test', status: 'pending' },
       ],
-      files: ['CHANGELOG.md'],
+      files: ['src/cart/CartTable.ts'],
     },
   ],
   log: [
-    { kind: 'prompt', text: 'add dark mode to Settings', thread: 1 },
+    { kind: 'prompt', text: 'fix the rounding in tax.ts', thread: 1 },
     { kind: 'todo', text: '0/3 todos done', thread: 1 },
-    { kind: 'edit', text: 'settings/Settings.tsx', thread: 1 },
-    { kind: 'edit', text: 'theme/tokens.ts', thread: 1 },
+    { kind: 'edit', text: 'checkout/tax.ts', thread: 1 },
+    { kind: 'edit', text: 'test/tax.test.ts', thread: 1 },
     { kind: 'prompt', text: 'why is CI red?', thread: 2 },
     { kind: 'agent', text: 'helper: read the CI logs', thread: 2 },
     { kind: 'prompt', text: 'bump Node 20 to 22 in CI', thread: 3 },
     { kind: 'edit', text: 'workflows/ci.yml', thread: 3 },
     { kind: 'edit', text: '.nvmrc', thread: 3 },
     { kind: 'commit', text: 'commit: Use Node 22 in CI', thread: 3 },
-    { kind: 'return', text: 'back to Add dark mode to Settings', thread: 1 },
-    { kind: 'edit', text: 'settings/Settings.test.tsx', thread: 1 },
-    { kind: 'test', text: 'tests fail: npm test: 41 pass, 1 fail', thread: 1 },
-    { kind: 'error', text: 'Bash: 1 snapshot failed in Settings.test.tsx', thread: 1 },
-    { kind: 'prompt', text: 'ok, now write the release notes', thread: 4 },
+    { kind: 'return', text: 'back to Fix checkout tax rounding', thread: 1 },
+    { kind: 'edit', text: 'test/receipt.test.ts', thread: 1 },
+    { kind: 'test', text: 'tests fail: npm test: 11 pass, 1 fail', thread: 1 },
+    { kind: 'error', text: 'Bash: receipt total off by 1 cent in receipt.test.ts', thread: 1 },
+    { kind: 'prompt', text: 'next, show the tax on each cart line', thread: 4 },
     { kind: 'todo', text: '0/3 todos done', thread: 4 },
-    { kind: 'edit', text: 'CHANGELOG.md', thread: 4 },
+    { kind: 'edit', text: 'cart/CartTable.ts', thread: 4 },
   ],
-  lastTest: { ok: false, text: 'npm test: 41 pass, 1 fail' },
+  lastTest: { ok: false, text: 'npm test: 11 pass, 1 fail' },
 })
 
 const HOUR = 60 * MIN
@@ -273,18 +272,18 @@ const DAY = 24 * HOUR
 /** Sample Artifacts this project published, spread over days. */
 export const demoArtifacts = (now: number): ArtifactRow[] =>
   [
-    { title: 'band look', created: now - 2 * DAY, modified: now - 3 * HOUR, url: 'https://claude.ai/code/artifact/4f1c2b7e-band-look' },
+    { title: 'tax rounding: before and after', created: now - 2 * HOUR, modified: now - 25 * MIN, url: 'https://claude.ai/code/artifact/4f1c2b7e-tax-rounding' },
     { title: 'release notes v2.4 draft', created: now - 40 * MIN, modified: now - 6 * MIN, url: 'https://claude.ai/code/artifact/9a3e51d0-release-notes' },
-    { title: 'load test report', created: now - 5 * DAY, modified: now - 1 * DAY, url: 'https://claude.ai/code/artifact/c27d8e44-load-test-report' },
-    { title: 'security audit', created: now - 9 * DAY, modified: now - 9 * DAY, url: 'https://claude.ai/code/artifact/e80b13fa-security-audit' },
+    { title: 'checkout load test report', created: now - 5 * DAY, modified: now - 1 * DAY, url: 'https://claude.ai/code/artifact/c27d8e44-checkout-load-test' },
+    { title: 'payments security audit', created: now - 9 * DAY, modified: now - 9 * DAY, url: 'https://claude.ai/code/artifact/e80b13fa-payments-audit' },
     { title: 'Settings dark mode options', created: now - 26 * HOUR, modified: now - 20 * HOUR, url: 'https://claude.ai/code/artifact/71d0c9b2-dark-mode' },
   ].sort((a, b) => b.modified - a.modified)
 
-/** Haiku's real reply (claude-haiku-5-5, 2026-11-24) to summaryPrompt(summaryInput(demoObserved)): 223 output tokens. */
+/** Haiku's real reply (claude-haiku-5-5, 2026-11-24) to summaryPrompt(summaryInput(demoObserved)): 501 chars of JSON. */
 export const DEMO_REPLY =
-  '{"p":38,"t":[["Theme toggle in Settings","d","Added a theme toggle to Settings."],["Move colors to tokens","a","Moving colors to theme tokens."],' +
-  '["Update Settings snapshot","b","Snapshot fails after the change."],["Explain red CI","d","Answered why CI was red."],' +
-  '["Node 22 in CI","d","CI workflow now uses Node 22."],["Collect merged PRs","a","Gathering merged PRs since v2.3."],' +
-  '["Draft the notes","r","Write the release notes draft."],["Ask for review","r","Request review of the notes."]],' +
-  '"b":["Snapshot test fails after the theme change."]}'
+  '{"p":29,"t":[["Round tax per line","d","Tax now rounds to the cent per line."],["Fix tax tests","r","Two tax tests still fail; paused."],' +
+  '["Update receipt snapshot","b","Waiting on the one-cent receipt fix."],["Use Node 22","d","CI now runs on Node 22."],' +
+  '["Add tax column","a","Adding a tax column to CartTable now."],["Format with formatMoney","r","Format the new tax column."],' +
+  '["Add cart table test","r","Write a test for the cart table."]],' +
+  '"b":["Receipt total is off by 1 cent in receipt.test.ts."]}'
 export const demoSummary: Summary = parseSummary(DEMO_REPLY)

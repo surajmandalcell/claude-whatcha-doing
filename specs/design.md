@@ -45,7 +45,7 @@ All looks are settled. Nothing is open.
 - **Summary budget**: at most 600 input and 250 output tokens per call. The input is a compact digest
   (one line per thread with counts, at most 10 todos, only the last test and error, oldest lines dropped
   past 1800 chars). The reply is short-key JSON, at most 8 tasks as `[name, d|a|b|r, ≤8 words]`; work
-  left is the left tasks, not asked again. The frozen demo reply took 223 output tokens.
+  left is the left tasks, not asked again. The frozen demo reply is 501 characters, about 125 tokens.
 - **Artifacts tab**: every Artifact the project published (from the Artifact tool's publish calls),
   newest change first. Two lines each, tied by a dim dot and hook: `● <name>`, then
   `╰╴🔗 <link>` (dim). 🔗 is 2 columns wide; the link is cut 3 columns sooner for it. Two fixed

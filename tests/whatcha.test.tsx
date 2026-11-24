@@ -82,9 +82,9 @@ test('band: one status row collapsed; Threads shows the git graph and every thre
   await $.command.run(whatcha('demo'))
   const ui = await $.ui.mount(BAND())
   const row = flat(await ui.drawn())
-  expect(row).toContain('now: Write release notes')
+  expect(row).toContain('now: Show tax on each cart line')
   expect(row).toContain('2/4 threads done')
-  expect(row).toContain('~38%')
+  expect(row).toContain('~29%')
   expect(row).toContain('[Artifacts]')
   expect(row).not.toMatch(/\b[tsa]: |Enter|press /) // keys go to the prompt: no key labels
   await ui.press({ key: 'tab-threads' })
@@ -94,22 +94,22 @@ test('band: one status row collapsed; Threads shows the git graph and every thre
   expect(graph!.at(-1)).toBe('╵ now')
   expect(graph).toContain('│ ├─● Bump Node 20 to 22 in CI  done')
   expect(graph).toContain('│ │ │ ✓ Use Node 22 in the CI workflow') // a done thread keeps its ticks
-  expect(graph).toContain('├─┴─╯ ✗ tests fail: npm test: 41 pass, 1 fail') // the merge sits on the row it returns to
+  expect(graph).toContain('├─┴─╯ ✗ tests fail: npm test: 11 pass, 1 fail') // the merge sits on the row it returns to
   expect(graph!.join('\n')).not.toContain('back to')
   for (const l of graph!.slice(1)) expect(l).toMatch(/^[│├●╵╷┆]/)
   // A table: status, title, then Tasks, Started, Last right-aligned; the prompt and what it did under the title.
   const at = (s: string) => ' '.repeat(58 - s.length)
   expect(list![0]).toBe(`4 threads${at('4 threads')}       Tasks  Started     Last`)
-  expect(list).toContain(`▾ Write release notes${at('▾ Write release notes')}     ▱▱▱ 0/3  18m ago      now`)
-  expect(list).toContain(`✗ Add dark mode to Settings${at('✗ Add dark mode to Settings')}     ▰▱▱ 1/3   2h ago  25m ago`)
+  expect(list).toContain(`▾ Show tax on each cart line${at('▾ Show tax on each cart line')}     ▱▱▱ 0/3  18m ago      now`)
+  expect(list).toContain(`✗ Fix checkout tax rounding${at('✗ Fix checkout tax rounding')}     ▰▱▱ 1/3   2h ago  25m ago`)
   expect(list).toContain(`✓ Why is CI red?${at('✓ Why is CI red?')}${' '.repeat(12)}   1h ago   1h ago`) // no tasks: an empty Tasks cell
-  expect(list).toContain('  ❯ "ok, now write the release notes for v2.4 in CHANGELOG.md from the PRs merged…"')
+  expect(list).toContain('  ❯ "next, show the tax on each cart line in src/cart/CartTable.ts, formatted with…"')
   // A failure sits on its own line under what the thread did, not inside it.
-  const did = list!.indexOf('  ⏺ Settings.tsx tokens.ts Settings.test.tsx · tests 41/42')
-  expect(list![did + 1]).toBe('  ✗ 1 snapshot failed in Settings.test.tsx')
+  const did = list!.indexOf('  ⏺ tax.ts tax.test.ts receipt.test.ts · tests 11/12')
+  expect(list![did + 1]).toBe('  ✗ receipt total off by 1 cent in receipt.test.ts')
   expect(list).toContain('  ⏺ ci.yml .nvmrc package.json · commit: Use Node 22 in CI')
   await ui.press({ key: 'more-threads' })
-  expect(columns(await ui.drawn())[1]).toContain('    ● Collect merged PRs since v2.3') // show all: the now thread opens with its tasks
+  expect(columns(await ui.drawn())[1]).toContain('    ● Add a tax column to CartTable') // show all: the now thread opens with its tasks
   await ui.press({ key: 'less' })
   // The right columns sit at the same offset in every title row: one first-box width, one cell length.
   const table = (bodyOf(await ui.drawn()).children[2]!.children as unknown as R[]).filter(r => r.type === 'Box' && r.children!.length === 2)
@@ -125,11 +125,11 @@ test('minimize leaves an icon, and pressing it brings the row back', async ($, o
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.command.run(whatcha('demo'))
   const ui = await $.ui.mount(BAND())
-  expect(flat(await ui.drawn())).toContain('now: Write release notes')
+  expect(flat(await ui.drawn())).toContain('now: Show tax on each cart line')
   await ui.press({ key: 'min' })
   expect(flat(await ui.drawn()).trim()).toBe('[▴ @whatcha-doing]')
   await ui.press({ key: 'restore' })
-  expect(flat(await ui.drawn())).toContain('now: Write release notes')
+  expect(flat(await ui.drawn())).toContain('now: Show tax on each cart line')
   await ui.unmount()
 })
 
@@ -153,8 +153,8 @@ test('height: 30% of a tall terminal; a press on a cut end grows the band to sho
   const [allGraph, allSide] = columns(await ui.drawn())
   expect([...allGraph!, ...allSide!].join('\n')).not.toContain('more')
   expect(allGraph![0]).toBe('[╷ earlier · show less]')
-  expect(allGraph).toContain('● Add dark mode to Settings  paused')
-  expect(allGraph).toContain('│ ✓ Add a theme toggle to Settings') // the cut rows are back
+  expect(allGraph).toContain('● Fix checkout tax rounding  paused')
+  expect(allGraph).toContain('│ ✓ Round tax per line to the cent') // the cut rows are back
   expect(flat(await ui.drawn())).toContain('[Show less]')
   await ui.press({ key: 'earlier' })
   expect(columns(await ui.drawn())[0]!.length).toBe(6) // the same row again: back to normal
@@ -209,7 +209,7 @@ test('Haiku budget: the prompt stays at 600 tokens or fewer, even for a long ses
   const long = { ...demo, threads: Array.from({ length: 40 }, (_, i) => ({ ...t, id: i + 1, title: `${t.title} again and again ${i}` })) }
   expect(tokens(long)).toBeLessThanOrEqual(600)
   // The frozen demo reply is Haiku's real answer and reads back whole.
-  expect(parseSummary(DEMO_REPLY).tasks.length).toBe(8)
+  expect(parseSummary(DEMO_REPLY).tasks.length).toBe(7)
 })
 
 test('Artifacts: kept per project, newest change first, created and modified from the publishes', async ($, on) => {
