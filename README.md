@@ -1,6 +1,6 @@
-<div align="center">
+![Watcha Doing Claude: the Threads tab, a timeline on the left and a table of threads on the right](docs/threads.png)
 
-# whatcha-doing
+<div align="center">
 
 A band above the Claude Code prompt that shows what you asked each session and what it actually did.
 
@@ -9,8 +9,6 @@ A band above the Claude Code prompt that shows what you asked each session and w
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 </div>
-
-![The Threads tab: a timeline on the left, a table of threads on the right](docs/threads.png)
 
 ## Why
 
