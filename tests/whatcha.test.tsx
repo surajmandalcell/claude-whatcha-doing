@@ -211,6 +211,8 @@ test('Haiku budget: the prompt stays at 600 tokens or fewer, even for a long ses
   // The frozen demo reply is Haiku's real answer and reads back whole.
   expect(parseSummary(DEMO_REPLY).tasks.length).toBe(7)
   expect(parseSummary('{"p":90,"t":[["Tax fix","d","done"]],"b":[""]}').blockers).toEqual([])
+  expect(parseSummary('{"p":90,"t":[["Tax fix","d","done"]],"b":["CI is red"]}').blockers).toEqual([])
+  expect(parseSummary('{"p":50,"t":[["Tax fix","b","stuck"]],"b":["None","CI is red"]}').blockers).toEqual(['CI is red'])
 })
 
 test('Artifacts: kept per project, newest change first, created and modified from the publishes', async ($, on) => {
