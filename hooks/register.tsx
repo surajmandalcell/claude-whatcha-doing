@@ -4,7 +4,7 @@ import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Regist
 import type { ArtifactRow, Artifacts, Band, Observed, Summary, SummaryCache, Tab, Thread, Todo } from '../types'
 import {
   demoArtifacts, demoObserved, demoSummary, emptyObserved, hash, isTestCommand, onAgent, onArtifact, onCommit, onEdit,
-  dropEngineText, isEngineText, noticeOf, onNotice, onError, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, short, snippet, stamp, testResult, SUMMARY_SYSTEM, summaryInput,
+  dropEngineText, isEngineText, noticeOf, titleOf, onNotice, onError, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, short, snippet, stamp, testResult, SUMMARY_SYSTEM, summaryInput,
   summaryPrompt, SUMMARY_OUT,
 } from './observe'
 
@@ -373,6 +373,14 @@ export function graphRows(o: Observed): GraphRow[] {
     .filter((a, i, all) => !(a.kind === 'prompt' && all[i - 1]?.kind === 'return' && all[i - 1]?.thread === a.thread))
     // A tool error right after a failed test of the same thread is that failure again.
     .filter((a, i, all) => !(a.kind === 'error' && all[i - 1]?.kind === 'test' && all[i - 1]?.thread === a.thread && all[i - 1]!.text.startsWith('tests fail')))
+    // Back-to-back test runs of one thread with the same result read as one row: "3× tests pass: …".
+    .reduce<(Observed['log'][number] & { n?: number })[]>((acc, a) => {
+      const last = acc.at(-1)
+      const fails = (x: { text: string }) => x.text.startsWith('tests fail')
+      if (a.kind === 'test' && last?.kind === 'test' && last.thread === a.thread && fails(last) === fails(a)) acc[acc.length - 1] = { ...a, n: (last.n ?? 1) + 1 }
+      else acc.push(a)
+      return acc
+    }, [])
   // A thread's tasks sit after its last event: where it stands now.
   const lastAt = new Map<number, number>()
   events.forEach((a, i) => lastAt.set(a.thread, i))
@@ -380,6 +388,7 @@ export function graphRows(o: Observed): GraphRow[] {
   let prev = -1 // deepest open lane
   let merge: { d: number; p: number } | undefined // a return waiting for its thread's next row
   let nowRow = -1
+  let lastPrompt: number | undefined // the thread of the last prompt row
   const flush = () => {
     if (merge) rows.push({ rail: lane(merge.d) + '├' + join(merge.d, merge.p), lanes: merge.p + 1 })
     merge = undefined
@@ -401,16 +410,19 @@ export function graphRows(o: Observed): GraphRow[] {
       const p = merge?.p ?? prev
       merge = undefined
       if (t?.id === o.current) nowRow = rows.length
-      const note = !t || t.state === 'active' ? '' : t.state
+      // A follow-up prompt in the same thread shows its own words; the thread's title already sits above it.
+      const again = t !== undefined && lastPrompt === t.id
+      lastPrompt = t?.id
+      const note = again || !t || t.state === 'active' ? '' : t.state
       const tone = t && isOver(t) ? 'success' : undefined
       // Fork: "├─● trip". New thread after a side trip with no return: "●─┴─╯ thread".
       const [rail, mark] = p >= 0 && d > p ? [lane(d - 1) + '├─', '●'] : d < p ? [lane(d), '●' + join(d, p)] : [lane(d), '●']
-      rows.push({ rail, lanes: Math.max(d, p) + 1, mark, tone, text: t?.title ?? a.text, note })
+      rows.push({ rail, lanes: Math.max(d, p) + 1, mark, tone, text: again ? titleOf(a.text) : t?.title ?? a.text, note })
       prev = d
     } else {
       const bad = a.kind === 'error' || a.text.startsWith('tests fail')
       const mark = a.kind === 'agent' ? '◆' : a.kind === 'commit' ? '◇' : bad ? '✗' : '✓'
-      detail(d, { mark, tone: bad ? 'error' : a.kind === 'test' ? 'success' : undefined, text: a.text, dim: !bad })
+      detail(d, { mark, tone: bad ? 'error' : a.kind === 'test' ? 'success' : undefined, text: a.n ? `${a.n}× ${a.text}` : a.text, dim: !bad })
     }
     // A thread's tasks hang off its rail after its last event.
     if (t && lastAt.get(t.id) === i) {

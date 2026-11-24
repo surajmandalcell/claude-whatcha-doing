@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { DEMO_REPLY, demoObserved, parseSummary, short, snippet, SUMMARY_SYSTEM, summaryInput, summaryPrompt, titleOf, isEngineText, dropEngineText, isTestCommand, noticeOf, onNotice } from '../hooks/observe'
-import { bodyCap, safeHref } from '../hooks/register'
+import { bodyCap, graphRows, safeHref } from '../hooks/register'
 
 test('only clean https URLs become links', () => {
   expect(safeHref('https://claude.ai/code/artifact/9a3e')).toBe('https://claude.ai/code/artifact/9a3e')
@@ -266,6 +266,17 @@ test('prompt line: the owner\'s words, cut at a word near 80 chars', () => {
   expect(noticeOf('fix the tax')).toBeUndefined()
   const step = onNotice(fixed, noticeOf(report)!)
   expect([step.threads.length, step.log.at(-1)!.kind, step.log.at(-1)!.text]).toEqual([1, 'agent', 'Agent "Cover page" finished'])
+  // A follow-up prompt shows its own words, not the title again; back-to-back test passes read as one row.
+  const graph = graphRows({
+    current: 1, threads: [{ id: 1, title: 'Fix the tax', state: 'done', todos: [], files: [] }],
+    log: [
+      { kind: 'prompt', text: 'fix the tax', thread: 1 },
+      { kind: 'prompt', text: 'now run the tests', thread: 1 },
+      { kind: 'test', text: 'tests pass: npm test', thread: 1 },
+      { kind: 'test', text: 'tests pass: npm test', thread: 1 },
+    ],
+  }).map(r => r.text)
+  expect(graph).toEqual(['Fix the tax', 'Now run tests', '2× tests pass: npm test'])
   expect([isTestCommand('npm test'), isTestCommand('claude plugin test .'), isTestCommand('sed -n 1p tests/tax.test.ts')]).toEqual([true, true, false])
   expect(titleOf('[Image #1] here reduce padding, its not using the full width. thanks'))
     .toBe('Here reduce padding, its not using full width')
