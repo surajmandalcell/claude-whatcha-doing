@@ -193,7 +193,8 @@ export function parseSummary(text: string): Summary {
   return {
     percent: Math.max(0, Math.min(100, Math.round(v.p))),
     tasks,
-    blockers: v.b,
+    // Haiku echoes the template's [""] when nothing is stuck; a blank one drew an empty "why:".
+    blockers: v.b.filter(b => typeof b === 'string' && b.trim()),
     // Work left is the left tasks by name: asking for it again would repeat text.
     remaining: tasks.filter(t => t.status === 'remaining').map(t => t.name),
   }

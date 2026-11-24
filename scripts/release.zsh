@@ -11,7 +11,7 @@ v=$(node -e '
   p.version = [a, b, c + 1].join(".")
   require("fs").writeFileSync(f, JSON.stringify(p, null, 2) + "\n")
   console.log(p.version)')
-git add -A
-git commit -q -m "Release $v"
+# Commit only the version: work in progress stays out of the release.
+git commit -q -m "Release $v" .claude-plugin/plugin.json
 git push -q
 echo "Released $v"
