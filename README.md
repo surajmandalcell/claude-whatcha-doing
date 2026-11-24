@@ -5,7 +5,7 @@
 A band above the Claude Code prompt that shows what you asked each session and what it actually did.
 
 [![Claude Code mod](https://img.shields.io/badge/Claude_Code-mod-d97757)](https://github.com/surajmandalcell/claude-whatcha-doing)
-[![version](https://img.shields.io/badge/version-1.0.0-blue)](.claude-plugin/plugin.json)
+[![version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsurajmandalcell%2Fclaude-whatcha-doing%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&color=blue)](.claude-plugin/plugin.json)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 </div>
@@ -89,12 +89,25 @@ file and commit counts, and the last test and error line. Nothing from the trans
 no replies, no file contents. The Artifacts list is kept in the mod's local store, one
 list per project folder. Nothing leaves your machine except that one Haiku call.
 
+## Updates
+
+Turn on auto-update once: `/plugin`, then Marketplaces, `claude-whatcha-doing`, Enable auto-update.
+Claude Code then fetches each new version when it starts. To update by hand:
+
+```sh
+claude plugin marketplace update claude-whatcha-doing
+claude plugin update whatcha-doing@claude-whatcha-doing
+```
+
 ## Develop
 
 ```sh
 claude plugin validate .
 claude plugin test .
+zsh scripts/release.zsh   # checks, bumps the patch version, commits and pushes
 ```
+
+Installed copies update only when the version in `.claude-plugin/plugin.json` changes, so release with the script.
 
 The design notes are in [specs/design.md](specs/design.md).
 

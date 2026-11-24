@@ -1,10 +1,19 @@
 {
   "name": "whatcha-doing",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A band above the prompt that shows what this Claude session is doing: tasks, side trips, files, activity and a short summary.",
-  "author": { "name": "Suraj Mandal" },
+  "author": {
+    "name": "Suraj Mandal"
+  },
   "homepage": "https://github.com/surajmandalcell/claude-whatcha-doing",
   "repository": "https://github.com/surajmandalcell/claude-whatcha-doing",
   "license": "MIT",
-  "keywords": ["claude-code", "mod", "status", "tasks", "session", "band"]
+  "keywords": [
+    "claude-code",
+    "mod",
+    "status",
+    "tasks",
+    "session",
+    "band"
+  ]
 }
