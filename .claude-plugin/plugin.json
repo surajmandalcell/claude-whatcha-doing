@@ -1,6 +1,6 @@
 {
   "name": "whatcha-doing",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "A band above the prompt that shows what this Claude session is doing: tasks, side trips, files, activity and a short summary.",
   "author": {
     "name": "Suraj Mandal"
