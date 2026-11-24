@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { DEMO_REPLY, demoObserved, parseSummary, short, snippet, SUMMARY_SYSTEM, summaryInput, summaryPrompt, titleOf } from '../hooks/observe'
+import { DEMO_REPLY, demoObserved, parseSummary, short, snippet, SUMMARY_SYSTEM, summaryInput, summaryPrompt, titleOf, isEngineText } from '../hooks/observe'
 import { bodyCap, safeHref } from '../hooks/register'
 
 test('only clean https URLs become links', () => {
@@ -246,6 +246,8 @@ test('prompt line: the owner\'s words, cut at a word near 80 chars', () => {
   expect(snippet('wait, unrelated: why would the CI workflow fail on this repo? just look, short answer'))
     .toBe('wait, unrelated: why would the CI workflow fail on this repo? just look, short…')
   // A title keeps the whole first clause (the row cuts it at its width) and drops pasted-image tags.
+  expect(isEngineText('<task-notification>\n<task-id>a1</task-id>')).toBe(true)
+  expect(isEngineText('fix the <div> in header')).toBe(false)
   expect(titleOf('[Image #1] here reduce padding, its not using the full width. thanks'))
     .toBe('Here reduce padding, its not using full width')
 })

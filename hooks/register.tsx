@@ -4,7 +4,7 @@ import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Regist
 import type { ArtifactRow, Artifacts, Band, Observed, Summary, SummaryCache, Tab, Thread, Todo } from '../types'
 import {
   demoArtifacts, demoObserved, demoSummary, emptyObserved, hash, isTestCommand, onAgent, onArtifact, onCommit, onEdit,
-  onError, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, short, snippet, stamp, testResult, SUMMARY_SYSTEM, summaryInput,
+  isEngineText, onError, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, short, snippet, stamp, testResult, SUMMARY_SYSTEM, summaryInput,
   summaryPrompt, SUMMARY_OUT,
 } from './observe'
 
@@ -108,7 +108,7 @@ export const register: Register = on => {
   })
 
   on('prompt.submit', async ($, e, next) => {
-    if (!e.command && !e.isMeta) {
+    if (!e.command && !e.isMeta && !isEngineText(e.text)) {
       const at = await $.clock.now()
       await update($, observed, o => stamp(onPrompt(o, e.text), at))
     }
@@ -120,7 +120,16 @@ export const register: Register = on => {
   // The main loop's answer closes the current thread (done or answered); a subagent's does not.
   on('turn.complete', async ($, e, next) => {
     if (!e.agentId) await update($, observed, o => onTurnEnd(o, e.reason === 'answer')).catch(() => {})
-    return next(e)
+    const r = await next(e)
+    // An open Summary tab follows the work: re-ask Haiku once per turn, only when the threads changed (the key dedups).
+    if (!e.agentId && (await read($, tabAtom)) === 'summary' && (await read($, band)).mode === 'expanded') {
+      void showSummary({
+        state: async () => [await read($, demo), await read($, observed), await read($, summary)],
+        set: c => update($, summary, () => c),
+        complete: q => $.model.complete(q),
+      }).catch(() => {})
+    }
+    return r
   })
 
   on('tool.call', async ($, e, next) => {

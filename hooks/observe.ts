@@ -29,6 +29,10 @@ const ancestors = (o: Observed, id: number): Thread[] => {
   return t?.parent ? [...ancestors(o, t.parent), o.threads.find(x => x.id === t.parent)!].filter(Boolean) : []
 }
 
+/** Text the engine sends as a user turn (a background task's report, a reminder, a local command's echo), not a person's prompt. */
+export const isEngineText = (text: string) =>
+  /^\s*<(task-notification|system-reminder|local-command-[a-z]+|command-(name|message|args)|bash-(input|stdout|stderr))\b/.test(text)
+
 const SKIP = new Set('a an the to in on of for and or this that it is be my me please just would could can you'.split(' '))
 const words = (s: string) => s.toLowerCase().split(/[^a-z0-9.]+/).filter(w => w && !SKIP.has(w))
 /** First ~6 meaningful words of the first clause, without the cue ("wait, unrelated:"). */
