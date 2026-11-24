@@ -1,0 +1,6 @@
+{
+  "name": "claude-whatcha-doing",
+  "owner": { "name": "Suraj Mandal" },
+  "description": "whatcha-doing: a band above the Claude Code prompt that shows what each session was asked and what it did.",
+  "plugins": [{ "name": "whatcha-doing", "source": "./" }]
+}
