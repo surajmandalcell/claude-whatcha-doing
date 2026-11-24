@@ -199,7 +199,10 @@ export const register: Register = on => {
       <Box flexDirection="row" gap={isNarrow ? 1 : 2}>
         {/* No hotkey labels: keys go to the prompt, the band takes clicks. */}
         {TABS.map(([id, label]) => (
-          <Button key={`tab-${id}`} label={label} plain dimColor={!(isOpen && tab === id)} onPress={() => open(id)} />
+          // Dim tabs read as disabled: every tab is full text, the open one bold in the accent color.
+          <Button key={`tab-${id}`} label={label} plain onPress={() => open(id)}>
+            {isOpen && tab === id ? <Text bold color="suggestion">{label}</Text> : label}
+          </Button>
         ))}
         {isOpen && tab === 'summary' && <Button key="refresh" plain label="Refresh" onPress={() => showSummary(io, true)} />}
         {isOpen && b.all && <Button key="less" plain label="Show less" onPress={() => showAll(false)} />}
