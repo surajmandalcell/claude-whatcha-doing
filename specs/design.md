@@ -37,12 +37,13 @@ All looks are settled. Nothing is open.
   Claude Code gives it; the engine scrolls the rest. `Show less`, a size button, a tab, or the ring leaving
   the band goes back.
 - **Status row** (S, and the header of M and L): `▸ Now (X/N): <latest prompt>  │ tabs`, X of N threads
-  done; the glyph is the thread's own, as in the Threads tab. The latest prompt, cleaned, uses all the room up to a dim │ before the tabs, the three sizes and `▾` on the right, and is cut
+  done; the glyph is the thread's own, as in the Threads tab. 🤖: the latest prompt's 3-6 word on-device brief
+  (else its gist), a dim `…` while the model writes it; 👤 or no gist: the latest prompt, cleaned. It uses all the room up to a dim │ before the tabs, the three sizes and `▾` on the right, and is cut
   only at that edge. Under 120 columns the buttons take a second row.
 - **Header**: after the │, left to right with no gaps: ` Threads `` Summary `` Artifacts ` ┊ ` S `` M ``
   L ` ┊ ` 🤖 ` ┊ ` ⤒ `` ▲ `` ▼ `` ⤓ ` ` ▾ `. Each label has 1 space each side; the ┊ dividers are `#3a3a3a`.
 - **🤖 / 👤**: one button after the sizes. 🤖 (default) shows the on-device gists; 👤 shows the prompts as
-  typed, in every thread name and prompt row, in M and L. 2 columns wide, in a 4-wide box.
+  typed, in the status row and every thread name and prompt row, in S, M and L. 2 columns wide, in a 4-wide box.
 - **Remember view**: the size (S, M, L, hidden), 🤖/👤 and the open tab are kept in `$.store` and come
   back in the next session. The plugin setting `rememberView` (/plugin → whatcha-doing): `global`
   (default, one view for all sessions) or `per project` (one per cwd, key `view:<cwd>`; a project with
@@ -72,9 +73,10 @@ All looks are settled. Nothing is open.
   3. col 2: each task, `✓` done (dim), `●` running, `○` to do, `✗` stuck; its subject only. A thread with
      no tasks shows its last 3 things done instead: `✎ spec/icons.md` edits, `✓`/`✗` test
      runs, `◆` commits, `↳` helpers; their time and counts in the columns;
-  4. col 2: each later prompt to the thread, `› <prompt>` (the last 3), shown at `prompt.submit`. Only the
-     newest prompt of the whole timeline takes 2 rows, wrapped inside the left area, cut with "…" at the
-     end of the second. Every older prompt is one row: its on-device gist, else the prompt cut at the ┊.
+  4. col 2: each later prompt to the thread, `› <gist>` (the last 3), shown at `prompt.submit`: a dim `…`
+     until its gist lands, then the gist, else the prompt. Only the newest prompt of the whole timeline
+     takes 2 rows, wrapped inside the left area, cut with "…" at the end of the second. Every older prompt
+     is one row, cut at the ┊.
      Done rows and prompt rows sort by time together, oldest first; a row with no time keeps its place;
   5. col 2: `❯ <activeForm>…` of the running task (accent), word for word from TaskCreate or TodoWrite,
      the lowest row, like the chat's spinner.
@@ -90,11 +92,17 @@ All looks are settled. Nothing is open.
   stands in ("where are these? the rule files" reads `Rule files`).
 - **Prompt gists**: a prompt of 40 characters or more (after cleaning) goes to the on-device model
   with "the gist in 4 to 8 plain words, like a commit subject", one call at a time in the background, never on
-  redraw: after `prompt.submit`, and at load for the newest 20 long prompts without one. The reply is
-  stored as `gist` on the prompt's log entry (and on its thread when it opened it), so each prompt asks
-  once. A reply under 3 or over 9 words (never cut), ending on a dangling word, or that only repeats the
-  prompt's opening words is dropped. The thread row shows the gist of its first prompt in place of
-  the prompt; an older `›` row shows its own. Without a summary the cleaned prompt shows, cut at the ┊.
+  redraw. A just-sent prompt goes first in line, ahead of the load queue (the newest 20 long prompts
+  without one; older ones show as typed). The full prompt is sent, cut to 4000 characters (about 1000 of
+  the model's 4096 tokens, about 8 s), never skipped. A reply under 3 or over 9 words (never cut), ending
+  on a dangling word, or that only repeats the prompt's opening words is dropped, and the model is asked
+  once more for 3 to 5 words. When both fail, `gist` is `''` and the prompt shows; never a frozen `…`.
+  The reply is stored as `gist` on the prompt's log entry (and on its thread when it opened it), and the
+  write redraws the band. A just-sent prompt also gets `brief`, 3 to 6 words for the status row: the
+  gist when it is short enough, else the 3 to 5 word ask. The thread row shows the gist of its first
+  prompt in place of the prompt; a `›` row shows its own. The helper exits 2 only when the model can
+  never answer on this Mac (Apple Intelligence off, Mac not eligible), which stops the asks until
+  restart; a failed request (a guardrail, a model still loading) exits 1 and only that prompt falls back.
 - **New topic**: a prompt with 8 or more topic words that shares none with the current thread's name and
   prompts opens a new thread, even without a cue like "new thing". Picks pasted from an options page
   (every line `- Name: pick`) always answer the current thread.
