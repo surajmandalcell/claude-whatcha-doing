@@ -44,8 +44,9 @@ export type Summary = { percent: number; tasks: SummaryTask[]; blockers: string[
 /** startedAt: when the running Haiku call began (ms), for the progress bar. */
 export type SummaryCache = { key: string; summary?: Summary; error?: string; isLoading?: boolean; startedAt?: number }
 export type Tab = 'threads' | 'summary' | 'artifacts'
-/** The band: S one row (collapsed), M 4 body rows (compact), L opened up (expanded), or a single icon (min). all: "show all" grows the band to every row the engine gives. */
-export type Band = { mode: 'collapsed' | 'compact' | 'expanded' | 'min'; all?: boolean }/** One Artifact this project published: first seen and last published, in ms since the epoch. */
+/** The band: S one row (collapsed), M 4 body rows (compact), L opened up (expanded), or a single icon (min). all: "show all" grows the band to every row the engine gives. scroll: how many thread rows ▼ moved down under the pinned row. */
+export type Band = { mode: 'collapsed' | 'compact' | 'expanded' | 'min'; all?: boolean; scroll?: number }
+/** One Artifact this project published: first seen and last published, in ms since the epoch. */
 export type ArtifactRow = { url: string; title: string; created: number; modified: number }
 /** The project's Artifacts; `key` is the `$.store` key, one per project folder. */
 export type Artifacts = { key: string; rows: ArtifactRow[] }

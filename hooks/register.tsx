@@ -4,7 +4,7 @@ import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Regist
 import type { ArtifactRow, Artifacts, Band, Observed, Summary, SummaryCache, Tab, Thread, Todo } from '../types'
 import {
   demoArtifacts, demoObserved, demoSummary, emptyObserved, hash, isTestCommand, onAgent, onArtifact, onCommit, onEdit,
-  dropEngineText, isEngineText, noticeOf, onNotice, onError, onPlan, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, sentLabel, short, stamp, testResult, SUMMARY_SYSTEM, summaryInput,
+  dropEngineText, isEngineText, noticeOf, onNotice, onError, onPlan, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, sentLabel, short, stamp, unlist, testResult, SUMMARY_SYSTEM, summaryInput,
   summaryPrompt, SUMMARY_OUT, NAME_SYSTEM, threadName,
 } from './observe'
 import { onDevice } from './ondevice'
@@ -16,10 +16,10 @@ const summary = atom({ plugin: 'whatcha-doing', key: 'summary' } as const, { key
 const demo = atom({ plugin: 'whatcha-doing', key: 'isDemo' } as const, false, { shape: 'demo-1' })
 const band = atom({ plugin: 'whatcha-doing', key: 'band' } as const, { mode: 'collapsed' } as Band, { shape: 'band-2' })
 const artifacts = atom({ plugin: 'whatcha-doing', key: 'artifacts' } as const, { key: '', rows: [] } as Artifacts, { shape: 'artifacts-1' })
-/** L body rows: 20% of the terminal, at most 80 and at least 3; the engine's maxRows caps it too. */
-export const bodyCap = (rows: number) => Math.max(3, Math.min(80, Math.floor(rows * 0.2)))
+/** L body rows: 20% of the terminal, at most 22 and at least 3; the engine's maxRows caps it too. */
+export const bodyCap = (rows: number) => Math.max(3, Math.min(22, Math.floor(rows * 0.2)))
 /** M body rows: the few most useful lines of the shown tab. */
-export const COMPACT_ROWS = 4
+export const COMPACT_ROWS = 5
 const TABS: [Tab, string][] = [['threads', 'Threads'], ['summary', 'Summary'], ['artifacts', 'Artifacts']]
 const SIZES: [Band['mode'], string][] = [['collapsed', 'S'], ['compact', 'M'], ['expanded', 'L']]
 
@@ -197,11 +197,11 @@ export const register: Register = on => {
     const cols = e.props.bodyColumns
     const width = e.surface === 'terminal' ? cols : undefined
     const stack = (mine: NonNullable<typeof below>) => (below ? <Box flexDirection="column">{mine}{below}</Box> : mine)
-    const setMode = (mode: Band['mode']) => update($, band, (x): Band => ({ ...x, mode, all: false }))
+    const setMode = (mode: Band['mode']) => update($, band, (x): Band => ({ ...x, mode, all: false, scroll: 0 }))
     const open = async (t: Tab) => {
       await update($, tabAtom, () => t)
       // A tab keeps a Compact band compact; from the one row it opens to Regular.
-      await update($, band, (x): Band => ({ ...x, mode: x.mode === 'compact' ? 'compact' : 'expanded', all: false }))
+      await update($, band, (x): Band => ({ ...x, mode: x.mode === 'compact' ? 'compact' : 'expanded', all: false, scroll: 0 }))
       if (t === 'summary') await showSummary(io)
     }
     const showAll = (all: boolean) => update($, band, (x): Band => ({ ...x, all }))
@@ -227,14 +227,29 @@ export const register: Register = on => {
     const isOpen = b.mode === 'expanded' || b.mode === 'compact'
     // Under 120 columns the buttons do not fit beside the status: they take a row of their own.
     const isNarrow = cols < 120
+    // Room for the body: the height rule, and never past what the engine gives the band (header + hairline).
+    // Show all draws every row: the band grows to all the engine gives (maxRows) and scrolls the rest.
+    const cap = b.all ? Infinity : Math.max(3, Math.min(bodyCap(e.viewport?.rows ?? 50), e.props.maxRows - (isNarrow ? 3 : 2)))
+    // How far ▼ can move the thread rows under the pinned row: M always, L only when the list is cut.
+    const room = !isOpen || tab !== 'threads' || b.all ? 0
+      : b.mode === 'compact' ? (now ? Math.max(0, threadBlock(els, o, now).sub.length - (COMPACT_ROWS - 1)) : 0)
+      : Math.max(0, threadList(els, d, cols).length - cap)
+    const off = Math.min(b.scroll ?? 0, room)
+    const scrollTo = (n: number) => update($, band, (x): Band => ({ ...x, scroll: n }))
+    // 3 columns wide like the sizes; an arrow that cannot move stays in place, dim, so nothing shifts.
+    const arrow = (key: string, glyph: string, can: boolean, to: number) =>
+      can ? <Button key={key} plain label={` ${glyph} `} onPress={() => scrollTo(to)} /> : <Text dimColor>{` ${glyph} `}</Text>
+    const [g, tone] = now ? headGlyph(o, now) : ['●', 'suggestion']
     const status = (
       <Text wrap="truncate-end">
-        <Text color="suggestion">●</Text> Now ({over}/{o.threads.length}): <Text bold>{now ? nameOf(now) : 'waiting for the first prompt'}</Text>
+        <Text color={tone}>{g}</Text> Now ({over}/{o.threads.length}): <Text bold>{now ? nameOf(now) : 'waiting for the first prompt'}</Text>
         {pct !== undefined && <Text>  ·  ~{pct}% <Text color="suggestion">{meter(pct, 5)}</Text></Text>}
       </Text>
     )
     const buttons = (
       <Box flexDirection="row" gap={isNarrow ? 1 : 2}>
+        {room > 0 && arrow('up', '▲', off > 0, off - 1)}
+        {room > 0 && arrow('down', '▼', off < room, off + 1)}
         {/* No hotkey labels: keys go to the prompt, the band takes clicks. */}
         {TABS.map(([id, label]) => (
           // Dim tabs read as disabled: every tab is full text, the open one bold in the accent color.
@@ -265,12 +280,9 @@ export const register: Register = on => {
     )
     if (!isOpen) return stack(row)
 
-    // Room for the body: the height rule, and never past what the engine gives the band (header + hairline).
-    // Show all draws every row: the band grows to all the engine gives (maxRows) and scrolls the rest.
-    const cap = b.all ? Infinity : Math.max(3, Math.min(bodyCap(e.viewport?.rows ?? 50), e.props.maxRows - (isNarrow ? 3 : 2)))
     // Push, not overlay: an absolute Box with a negative top is clipped to the band, so it cannot paint over the chat.
     const rule = <Text dimColor wrap="truncate-end">{'─'.repeat(cols)}</Text>
-    const main = b.mode === 'compact' ? <Box flexDirection="column">{brief(els, d, act, cols)}</Box> : body(els, d, act, cap, cols)
+    const main = b.mode === 'compact' ? <Box flexDirection="column">{brief(els, d, act, cols, off)}</Box> : body(els, d, act, cap, cols, off)
     return stack(<Box flexDirection="column" width={width}>{row}{rule}{main}</Box>)
   }).catch(($, e, next) => next(e))
 
@@ -359,20 +371,18 @@ export function ago(ms: number): string {
 }
 
 /** The open band's body for the shown tab, every list cut to `cap` rows (Infinity in the pane). */
-function body(els: Els, d: Data, act: Acts, cap: number, cols: number): JSX.Element {
+function body(els: Els, d: Data, act: Acts, cap: number, cols: number, off: number): JSX.Element {
   const { Box, Text } = els
   if (d.tab === 'summary') return summaryView(els, d.cache, cap, act, cols, d.now)
   if (d.tab === 'artifacts') return <Box flexDirection="column">{fit(els, artifactRows(els, d.arts, d.now, act, cols), cap, act, 'arts')}</Box>
-  const rows = threadRows(els, d.o)
-  // A narrow terminal: the running task goes under the threads, full width.
-  if (cols < 100) {
-    const all = rows.length ? [...rows, <Text> </Text>, ...taskDetail(els, d.o, cols)] : [<Text dimColor>Nothing yet.</Text>]
-    return <Box flexDirection="column">{fit(els, all, cap, act, 'threads')}</Box>
-  }
+  // The first row (the current thread) stays pinned; ▲ ▼ move the rest under it.
+  const all = threadList(els, d, cols)
+  const shown = fit(els, [all[0]!, ...all.slice(1 + off)], cap, act, 'threads')
+  if (cols < 100) return <Box flexDirection="column">{shown}</Box>
   // [threads | faint divider | running task]; the divider is as tall as the taller side.
   const leftW = Math.floor(cols * 0.6)
   const rightW = cols - leftW - 2 * DIV_GAP - 1
-  const left = fit(els, rows.length ? rows : [<Text dimColor>Nothing yet.</Text>], cap, act, 'threads')
+  const left = shown
   const right = fit(els, taskDetail(els, d.o, rightW), cap, act, 'task')
   const tall = Math.max(left.length, right.length)
   return (
@@ -385,11 +395,19 @@ function body(els: Els, d: Data, act: Acts, cap: number, cols: number): JSX.Elem
 }
 const DIV_GAP = 2
 
+/** The Threads tab's scrolling list; under 100 columns the running task goes under the threads, full width. */
+function threadList(els: Els, d: Data, cols: number): JSX.Element[] {
+  const { Text } = els
+  const rows = threadRows(els, d.o)
+  if (!rows.length) return [<Text dimColor>Nothing yet.</Text>]
+  return cols < 100 ? [...rows, <Text> </Text>, ...taskDetail(els, d.o, cols)] : rows
+}
+
 /**
  * The Compact body: the shown tab's most useful COMPACT_ROWS lines. Threads: the newest graph rows.
  * Summary: the head (or the updating bar), what is active or stuck, and the work left. Artifacts: the newest one.
  */
-function brief(els: Els, d: Data, act: Acts, cols: number): JSX.Element[] {
+function brief(els: Els, d: Data, act: Acts, cols: number, off: number): JSX.Element[] {
   const { Text } = els
   if (d.tab === 'artifacts') return artifactRows(els, d.arts, d.now, act, cols).slice(0, COMPACT_ROWS)
   if (d.tab === 'threads') {
@@ -397,7 +415,7 @@ function brief(els: Els, d: Data, act: Acts, cols: number): JSX.Element[] {
     const t = byId(d.o, d.o.current)
     if (!t) return [<Text dimColor>Nothing yet.</Text>]
     const b = threadBlock(els, d.o, t)
-    return [b.lead, ...b.sub.slice(0, COMPACT_ROWS - 1)]
+    return [b.lead, ...b.sub.slice(off, off + COMPACT_ROWS - 1)]
   }
   const s = d.cache.summary
   if (!s) return [summaryView(els, d.cache, COMPACT_ROWS, act, cols, d.now)]
@@ -426,7 +444,11 @@ function fit({ Text, Button }: Els, lines: JSX.Element[], n: number, act: Acts, 
 // ---- Threads tab: each thread with its tasks and plan steps; beside it, the running task in detail ----
 
 /** A thread's shown name: the on-device model's, else the title from the first prompt. */
-const nameOf = (t: Thread) => t.name ?? t.title
+const nameOf = (t: Thread) => t.name ?? unlist(t.title)
+/** One glyph per thread state, the same in S, M and L: ▸ now, ✓ done, ✗ stuck, ⏸ paused. */
+const headGlyph = (o: Observed, t: Thread): [string, string?] =>
+  t.id === o.current ? ['▸', 'suggestion'] : isOver(t) ? ['✓', 'success']
+    : t.todos.some(d => d.status === 'blocked') ? ['✗', 'error'] : t.state === 'paused' ? ['⏸'] : ['▸']
 const plural = (n: number, s: string) => `${n} ${s}${n === 1 ? '' : 's'}`
 const rank = (o: Observed, t: Thread) => (t.id === o.current ? 0 : isOver(t) ? 2 : 1)
 /** The current thread first, then open ones, then finished ones; newest first in each group. */
@@ -464,8 +486,7 @@ function threadBlock(els: Els, o: Observed, t: Thread): { lead: JSX.Element; sub
   const n = t.todos.length
   const ok = t.todos.filter(d => d.status === 'completed').length
   const steps = (t.plan ?? []).filter(s => s.mark !== '#' && s.depth === 0).length
-  const hasFail = t.todos.some(d => d.status === 'blocked')
-  const [g, tone] = isNow ? ['▸', 'suggestion'] : isOver(t) ? ['✓', 'success'] : hasFail ? ['✗', 'error'] : ['■']
+  const [g, tone] = headGlyph(o, t)
   const progress = n ? `${ok} of ${n} done` : steps ? `plan · ${plural(steps, 'step')}` : ''
   const lead = (
     <Box flexDirection="row" gap={2}>

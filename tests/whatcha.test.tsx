@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { DEMO_REPLY, demoObserved, planSteps, sentLabel, threadName, parseSummary, short, snippet, SUMMARY_SYSTEM, summaryInput, summaryPrompt, titleOf, isEngineText, dropEngineText, isTestCommand, noticeOf, onNotice } from '../hooks/observe'
+import { DEMO_REPLY, demoObserved, planSteps, sentLabel, threadName, parseSummary, short, snippet, SUMMARY_SYSTEM, summaryInput, summaryPrompt, titleOf, testResult, isEngineText, dropEngineText, isTestCommand, noticeOf, onNotice } from '../hooks/observe'
 import { bodyCap, safeHref, wrap } from '../hooks/register'
 import { resetOnDevice } from '../hooks/ondevice'
 
@@ -117,7 +117,7 @@ test('band: one status row; Threads shows each thread with its tasks and plan, o
   const m = engine(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.command.run(whatcha('demo'))
-  const ui = await $.ui.mount(BAND(120, 155)) // 120 rows: a 24-row body, so the list cuts
+  const ui = await $.ui.mount(BAND(120, 155)) // 120 rows: a 22-row body (the most), so the list cuts
   const row = flat(await ui.drawn())
   expect(row).toContain('Now (2/4): Show tax on each cart line')
   expect(row).not.toContain('threads done')
@@ -126,9 +126,9 @@ test('band: one status row; Threads shows each thread with its tasks and plan, o
   expect(row).not.toMatch(/\b[tsa]: |Enter|press /) // keys go to the prompt: no key labels
   await ui.press({ key: 'tab-threads' })
   const [left, right, divider] = columns(await ui.drawn())
-  expect(left).toHaveLength(24)
+  expect(left).toHaveLength(22)
   expect(left!.at(-1)).toMatch(/^\+\d+ more$/)
-  expect(divider).toEqual(Array(24).fill('│')) // the divider spans every row
+  expect(divider).toEqual(Array(22).fill('│')) // the divider spans every row
   await ui.press({ key: 'more-threads' })
   const all = screen(await ui.drawn(), 150)
   console.log(['', 'Threads tab, L, show all, 150 columns:', ...all].join('\n'))
@@ -206,13 +206,13 @@ test('▾ hides the band to an icon, and pressing it brings the row back', async
   await ui.unmount()
 })
 
-test('height: L takes 20% of the terminal rows, at most 80 and at least 3; "+N more" shows all, Show less goes back', async ($, on) => {
-  expect([24, 50, 120, 1000, 10].map(bodyCap)).toEqual([4, 10, 24, 80, 3])
+test('height: L takes 20% of the terminal rows, at most 22 and at least 3; "+N more" shows all, Show less goes back', async ($, on) => {
+  expect([24, 50, 120, 1000, 10].map(bodyCap)).toEqual([4, 10, 22, 22, 3])
   engine(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.command.run(whatcha('demo'))
   await $.command.run(whatcha('threads'))
-  for (const [rows, cap] of [[24, 4], [50, 10], [120, 24]] as const) {
+  for (const [rows, cap] of [[24, 4], [50, 10], [120, 22]] as const) {
     const ui = await $.ui.mount(BAND(rows))
     const [left, , divider] = columns(await ui.drawn())
     expect([left!.length, divider!.length]).toEqual([cap, cap])
@@ -229,7 +229,7 @@ test('height: L takes 20% of the terminal rows, at most 80 and at least 3; "+N m
   await ui.unmount()
 })
 
-test('sizes: S is the one row, M the 4 most useful lines of the tab, L up to 20% of the rows', async ($, on) => {
+test('sizes: S is the one row, M the 5 most useful lines of the tab, L up to 20% of the rows', async ($, on) => {
   engine(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.command.run(whatcha('demo'))
@@ -246,7 +246,17 @@ test('sizes: S is the one row, M the 4 most useful lines of the tab, L up to 20%
     '  ❯ Adding a tax column to CartTable…',
     '    1 file',
     '  ● Add a tax column to CartTable',
+    '  ○ Format it with formatMoney',
   ])
+  // ▲ ▼ move the sub rows under the pinned head; at the top ▲ is dim text, not a button.
+  expect(flat(await band())).toMatch(/ ▲ \n\[ ▼ \]/)
+  await ui.press({ key: 'down' })
+  const moved = screen(await band(), 150).slice(2)
+  expect(moved[0]).toMatch(/^▸ Show tax on each cart line/) // still pinned
+  expect(moved.slice(1)).toEqual(['    1 file', '  ● Add a tax column to CartTable', '  ○ Format it with formatMoney', '  ○ Add a cart table test'])
+  expect(flat(await band())).toMatch(/\[ ▲ \]\n\[ ▼ \]/)
+  await ui.press({ key: 'up' })
+  expect(screen(await band(), 150)[3]).toBe('  ❯ Adding a tax column to CartTable…')
   await ui.press({ key: 'tab-summary' }) // a tab keeps the band compact
   expect(await rows()).toEqual([
     "~29% done ▰▰▰▱▱▱▱▱▱▱  Haiku's estimate",
@@ -255,7 +265,7 @@ test('sizes: S is the one row, M the 4 most useful lines of the tab, L up to 20%
   ])
   await ui.press({ key: 'tab-artifacts' })
   const arts = await rows()
-  expect(arts).toHaveLength(4)
+  expect(arts).toHaveLength(5)
   expect(arts[0]).toMatch(/Artifacts  ·  click copies the link\s+Created  Modified$/)
   await ui.press({ key: 'size-expanded' })
   await ui.press({ key: 'tab-threads' })
@@ -263,7 +273,7 @@ test('sizes: S is the one row, M the 4 most useful lines of the tab, L up to 20%
   await ui.press({ key: 'size-collapsed' })
   expect(flat(await band())).not.toContain('───') // the status row alone: no rule, no body
   await $.command.run(whatcha('compact'))
-  expect(await rows()).toHaveLength(4)
+  expect(await rows()).toHaveLength(5)
   await ui.unmount()
 })
 
@@ -406,6 +416,12 @@ test('prompt line: the owner\'s words, cut at a word near 80 chars', () => {
   expect(not.filter(isTestCommand)).toEqual([])
   expect(titleOf('[Image #1] here reduce padding, its not using the full width. thanks'))
     .toBe('Here reduce padding, its not using full width')
+  // A prompt typed as a list item or quote: the title keeps the words, not the "- ".
+  expect(['- Prompt reference: 4 Time sent', '1. fix the tax', '> why is CI red?', '* [ ] add a test'].map(titleOf))
+    .toEqual(['Prompt reference', 'Fix tax', 'Why CI red', 'Add test'])
+  // A chained command names only its test run, the last one.
+  expect(testResult('sed -n 45p types/index.d.ts; tsc -p . && claude plugin validate . && claude plugin test . 2>&1 | tail -3', '18 pass\n0 fail', false).text)
+    .toBe('claude plugin test .: 18 pass, 0 fail')
 })
 
 // A real session (5 prompts) replayed with its tool calls and results, taken from its transcript.
@@ -525,7 +541,12 @@ test('thread name: the on-device model names a new thread in the background; wit
   hasModel = false
   await prompt('new thing: fix the receipt snapshot test')
   await new Promise(r => setTimeout(r, 0))
-  expect(await status()).toContain('Now (0/2): Fix receipt snapshot test')
+  expect(await status()).toContain('▸ Now (0/2): Fix receipt snapshot test') // the status row uses the thread glyph
+  const l = await $.ui.mount(BAND(120))
+  await l.press({ key: 'tab-threads' })
+  expect(columns(await l.drawn())[0]!.filter(r => /^\S/.test(r)).map(r => r.split(/ {3,}/)[0]))
+    .toEqual(['▸ Fix receipt snapshot test  ·  now', '⏸ Checkout timeout at Razorpay  ·  paused'])
+  await l.unmount()
   expect([threadName('Name: "Fix the tax"'), threadName(''), threadName('one two three four five six seven eight')]).toEqual(['Fix the tax', undefined, 'One two three four five six'])
 })
 

@@ -22,7 +22,7 @@ const setThread = (o: Observed, id: number, fn: (t: Thread) => Thread): Observed
 function open(o: Observed, title: string, parent?: number): Observed {
   const id = (o.threads.at(-1)?.id ?? 0) + 1
   const paused = o.threads.map(t => (t.id === o.current && t.state === 'active' ? { ...t, state: 'paused' as const } : t))
-  return { ...o, current: id, threads: [...paused, { id, title: short(title), parent, state: 'active', todos: [], files: [] }] }
+  return { ...o, current: id, threads: [...paused, { id, title: short(title, 200), parent, state: 'active', todos: [], files: [] }] }
 }
 const ancestors = (o: Observed, id: number): Thread[] => {
   const t = o.threads.find(x => x.id === id)
@@ -57,7 +57,7 @@ export function dropEngineText(o: Observed): Observed {
   const threads = o.threads.map(t => {
     if (!isEngineText(t.title)) return t
     const p = log.find(a => a.kind === 'prompt' && a.thread === t.id)
-    return { ...t, title: p ? short(titleOf(p.text)) : 'Background tasks' }
+    return { ...t, title: p ? short(titleOf(p.text), 200) : 'Background tasks' }
   })
   return { ...o, log, threads }
 }
@@ -67,11 +67,14 @@ const words = (s: string) => s.toLowerCase().split(/[^a-z0-9.]+/).filter(w => w 
 /** First ~6 meaningful words of the first clause, without the cue ("wait, unrelated:"). */
 export function titleOf(text: string): string {
   // Pasted images and text are noise in a title; the row cuts at the real width, so keep the whole first clause.
-  const plain = text.replace(/\[(Image|Pasted text) #\d+[^\]]*\]/g, ' ').replace(CUE, '')
+  const plain = text.replace(/\[(Image|Pasted text) #\d+[^\]]*\]/g, ' ').replace(LIST, '').replace(CUE, '')
   const w = plain.split(/[:?!\n]|\.\s/)[0]!.split(/\s+/).filter(x => x && !SKIP.has(x.toLowerCase()))
   const t = w.slice(0, 24).join(' ')
-  return t ? t[0]!.toUpperCase() + t.slice(1) : short(text)
+  return t ? t[0]!.toUpperCase() + t.slice(1) : short(plain, 200)
 }
+// A prompt typed as a list item or quote ("- Prompt reference: ...") keeps its words, not the "- ".
+const LIST = /^\s*((?:[-*+>]|\d+[.)]|\[[ xX]?\])\s+)+/
+export const unlist = (s: string) => s.replace(LIST, '')
 const CUE = /^\s*((ok(ay)?|so)[,\s]+)?((wait|btw|by the way|side question|quick question|unrelated|new thing|also|next|back to [^:,.]*|go(ing)? back( to [^:,.]*)?)\b[,:\s-]*)*/i
 const TANGENT = /^\s*(wait|btw|by the way|side question|quick question)\b|\bunrelated\b/i
 const RETURN = /^\s*((ok(ay)?|so)[,\s]+)?(back to|go(ing)? back)\b/i
@@ -171,19 +174,21 @@ export function testResult(cmd: string, out: string, isError: boolean) {
   // `npm test | head` exits 0 even when tests fail, so a parsed fail count wins over the exit code.
   const ok = fail !== undefined ? fail === 0 : !isError
   const counts = pass !== undefined || fail !== undefined ? `${pass ?? 0} pass, ${fail ?? 0} fail` : ''
-  return { ok, text: [cmd.split(/\||2>&1/)[0]!.trim(), counts].filter(Boolean).join(': ') }
+  // Only the test run of a chain: "sed -n 4p x; tsc -p . && npm test" reads as "npm test" (the last test run, so "tsc && npm test" names npm test).
+  const run = cmd.split(/;|&&|\|\||\|/).map(s => s.replace(/\s*2>&1\s*/g, ' ').trim()).filter(isTestCommand).at(-1) ?? cmd.trim()
+  return { ok, text: [run, counts].filter(Boolean).join(': ') }
 }
 
 /** A failed test run marks the current thread's running todo as blocked. */
 export function onTest(o: Observed, ok: boolean, text: string): Observed {
-  o = { ...log(o, 'test', `${ok ? 'tests pass' : 'tests fail'}: ${short(text, 60)}`), lastTest: { ok, text: short(text, 80) } }
+  o = { ...log(o, 'test', `${ok ? 'tests pass' : 'tests fail'}: ${short(text, 200)}`), lastTest: { ok, text: short(text, 80) } }
   return ok ? o : setThread(o, o.current, t => ({ ...t, todos: t.todos.map(x => (x.status === 'in_progress' ? { ...x, status: 'blocked' } : x)) }))
 }
 
 export const onError = (o: Observed, tool: string, text: string) => log(o, 'error', `${tool}: ${short(text.split('\n')[0] ?? '', 70)}`)
-export const onAgent = (o: Observed, what: string) => log(o, 'agent', `helper: ${short(what, 60)}`)
+export const onAgent = (o: Observed, what: string) => log(o, 'agent', `helper: ${short(what, 200)}`)
 /** `git commit -m "msg"`: the message, else the command. */
-export const onCommit = (o: Observed, cmd: string) => log(o, 'commit', `commit: ${short(cmd.match(/-m\s+(["'])(.*?)\1/)?.[2] ?? cmd, 60)}`)
+export const onCommit = (o: Observed, cmd: string) => log(o, 'commit', `commit: ${short(cmd.match(/-m\s+(["'])(.*?)\1/)?.[2] ?? cmd, 200)}`)
 // The tool word must stand alone as a command word, so a path such as tests/tax.test.ts is not a test run.
 // `test` counts only as another tool's argument (npm test, claude plugin test .), never the shell's own `test -f x`.
 export const isTestCommand = (cmd: string) =>
