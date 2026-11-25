@@ -1,6 +1,6 @@
 // Pure state changes from hooks, the demo fixture, and the Summary request.
 // No model calls here: the pane's passive tabs come only from these.
-import type { ArtifactRow, Observed, Summary, Thread, Todo } from '../types'
+import type { ArtifactRow, Observed, PlanStep, Summary, Thread, Todo } from '../types'
 
 export const emptyObserved: Observed = { threads: [], current: 0, log: [] }
 
@@ -104,9 +104,15 @@ export function onPrompt(o: Observed, text: string): Observed {
   return log(o, 'prompt', short(text, 80))
 }
 
-/** Marks the current thread as seen at `at`: the first time sets its start. */
-export const stamp = (o: Observed, at: number): Observed =>
-  setThread(o, o.current, t => ({ ...t, startedAt: t.startedAt ?? at, lastAt: at }))
+/** Marks the current thread as seen at `at`: the first time sets its start; `sent` marks a prompt the owner sent. */
+export const stamp = (o: Observed, at: number, sent = false): Observed =>
+  setThread(o, o.current, t => ({ ...t, startedAt: t.startedAt ?? at, lastAt: at, sentAt: sent ? at : t.sentAt }))
+
+/** "sent 10:42": the local clock time of the thread's last prompt. */
+export const sentLabel = (at: number) => {
+  const d = new Date(at)
+  return `sent ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
+}
 
 /** The first ~n chars on one line, cut at a word, so a prompt reads as the owner typed it. */
 export function snippet(s: string, n = 80): string {
@@ -179,7 +185,62 @@ export const onAgent = (o: Observed, what: string) => log(o, 'agent', `helper: $
 /** `git commit -m "msg"`: the message, else the command. */
 export const onCommit = (o: Observed, cmd: string) => log(o, 'commit', `commit: ${short(cmd.match(/-m\s+(["'])(.*?)\1/)?.[2] ?? cmd, 60)}`)
 // The tool word must stand alone as a command word, so a path such as tests/tax.test.ts is not a test run.
-export const isTestCommand = (cmd: string) => /(^|[\s;&|(])(test|jest|vitest|pytest|tsc|lint|eslint)(?=$|[\s;&|)])/.test(cmd)
+// `test` counts only as another tool's argument (npm test, claude plugin test .), never the shell's own `test -f x`.
+export const isTestCommand = (cmd: string) =>
+  /(^|[\s;&|(])(jest|vitest|pytest|tsc|lint|eslint)(?=$|[\s;&|)])/.test(cmd) ||
+  /(^|[\s;&|(])(?!(if|then|elif|while|until|do|!)\s)[^\s;&|(]+\s+test(?=$|[\s;&|)])/.test(cmd)
+
+const plain = (s: string) => s.replace(/\*\*|__|`/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/^\[[ xX]\]\s+/, '').replace(/\s+/g, ' ').trim()
+/**
+ * A plan's steps from its markdown: numbered and bulleted items at their nesting depth, and section headings.
+ * A wrapped item's next lines join it; prose, code blocks and headings with no items under them drop.
+ */
+export function planSteps(md: string): PlanStep[] {
+  const out: PlanStep[] = []
+  const indents: number[] = []
+  let inCode = false
+  let isOpen = false // the last item may take continuation lines
+  let wasBlank = false
+  for (const line of md.replace(/\t/g, '    ').split('\n')) {
+    if (/^\s*(```|~~~)/.test(line)) { inCode = !inCode; isOpen = false; continue }
+    if (inCode) continue
+    if (!line.trim()) { wasBlank = true; continue }
+    const h = /^\s*#{1,6}\s+(.+)/.exec(line)
+    const li = /^(\s*)([-*+]|\d+[.)])\s+(.+)/.exec(line)
+    if (h) {
+      out.push({ text: plain(h[1]!), depth: 0, mark: '#' })
+      indents.length = 0
+      isOpen = false
+    } else if (li) {
+      const ind = li[1]!.length
+      while (indents.length && indents.at(-1)! > ind) indents.pop()
+      if (!indents.length || indents.at(-1)! < ind) indents.push(ind)
+      out.push({ text: plain(li[3]!), depth: indents.length - 1, mark: /\d/.test(li[2]!) ? li[2]!.replace(')', '.') : '·' })
+      isOpen = true
+    } else if (isOpen && (!wasBlank || /^\s{2,}/.test(line))) out.at(-1)!.text += ' ' + plain(line)
+    else isOpen = false
+    wasBlank = false
+  }
+  // A heading with no item under it (Context, Notes) says nothing about the steps.
+  return out.filter((s, i) => s.mark !== '#' || (out[i + 1] !== undefined && out[i + 1]!.mark !== '#'))
+}
+
+/** Claude's plan (ExitPlanMode) goes on the current thread, replacing an older one. */
+export function onPlan(o: Observed, md: string): Observed {
+  const plan = planSteps(md)
+  if (!plan.some(s => s.mark !== '#')) return o
+  if (!cur(o)) o = open(o, plan.find(s => s.mark !== '#')!.text)
+  return setThread(o, o.current, t => ({ ...t, plan }))
+}
+
+/** The on-device model's thread name, kept to its first line and 6 words; undefined when it is not a name. */
+export const NAME_SYSTEM = 'Name the coding task in the message in 3 to 6 plain words. Reply with the name only, no quotes.'
+export function threadName(reply: string | undefined): string | undefined {
+  const w = (reply ?? '').split('\n')[0]!.replace(/^(name|title):\s*/i, '').replace(/["'“”‘’*_`.]/g, '').trim().split(/\s+/).filter(Boolean)
+  if (!w.length || w.length > 10) return undefined
+  const s = short(w.slice(0, 6).join(' '))
+  return s[0]!.toUpperCase() + s.slice(1)
+}
 
 /** The owner's budget per Haiku call (spec): input and output tokens. */
 export const SUMMARY_IN = 600
@@ -243,6 +304,21 @@ export function hash(s: string): string {
 }
 
 const MIN = 60_000
+/** The demo's plan as Claude writes one: a title, prose, numbered steps with nested bullets, a wrapped step. */
+export const DEMO_PLAN = `# Show tax per cart line
+
+## Context
+The cart shows one tax total; the owner wants it per line.
+
+## Steps
+1. Add a Tax column to \`CartTable.ts\`
+   - read the rate from the line item
+2. Format it with \`formatMoney\`, the same
+   way Price is formatted
+3. Add a cart table test
+
+## Verification
+- \`npm test\` passes`
 /** The sample session, its times counted back from `now`. */
 export const demoObserved = (now: number): Observed => ({
   current: 4,
@@ -250,10 +326,10 @@ export const demoObserved = (now: number): Observed => ({
     {
       id: 1, title: 'Fix checkout tax rounding', state: 'paused',
       prompt: 'the tax on a $10 mug shows $0.82, it should be $0.83. fix the rounding in src/checkout/tax.ts and run the tests',
-      startedAt: now - 130 * MIN, lastAt: now - 25 * MIN,
+      startedAt: now - 130 * MIN, sentAt: now - 130 * MIN, lastAt: now - 25 * MIN,
       todos: [
         { text: 'Round tax per line to the cent', status: 'completed' },
-        { text: 'Fix the two failing tax tests', status: 'in_progress' },
+        { text: 'Fix the two failing tax tests', status: 'in_progress', activeForm: 'Fixing the two failing tax tests' },
         { text: 'Update the receipt snapshot', status: 'blocked' },
       ],
       files: ['src/checkout/tax.ts', 'test/tax.test.ts', 'test/receipt.test.ts'],
@@ -261,25 +337,29 @@ export const demoObserved = (now: number): Observed => ({
     {
       id: 2, title: 'Why is CI red?', parent: 1, state: 'answered', todos: [], files: [],
       prompt: 'wait, why is CI red on main since this morning? just look, short answer',
-      startedAt: now - 110 * MIN, lastAt: now - 100 * MIN,
+      startedAt: now - 110 * MIN, sentAt: now - 110 * MIN, lastAt: now - 100 * MIN,
     },
     {
       id: 3, title: 'Bump Node 20 to 22 in CI', parent: 2, state: 'done',
       prompt: 'ok bump Node 20 to 22 in the CI workflow and .nvmrc, then commit',
-      startedAt: now - 95 * MIN, lastAt: now - 80 * MIN,
+      startedAt: now - 95 * MIN, sentAt: now - 95 * MIN, lastAt: now - 80 * MIN,
       todos: [{ text: 'Use Node 22 in the CI workflow', status: 'completed' }],
       files: ['.github/workflows/ci.yml', '.nvmrc', 'package.json'],
     },
     {
       id: 4, title: 'Show tax on each cart line', state: 'active',
       prompt: 'next, show the tax on each cart line in src/cart/CartTable.ts, formatted with formatMoney, and add a test',
-      startedAt: now - 18 * MIN, lastAt: now - 2 * MIN,
+      startedAt: now - 18 * MIN, sentAt: now - 18 * MIN, lastAt: now - 2 * MIN,
       todos: [
-        { text: 'Add a tax column to CartTable', status: 'in_progress' },
+        {
+          text: 'Add a tax column to CartTable', status: 'in_progress', activeForm: 'Adding a tax column to CartTable',
+          description: 'Add a Tax column after Price in src/cart/CartTable.ts. Read the rate from the line item, not the cart, so mixed-rate carts show the right tax per line. Keep the column right-aligned like Price.',
+        },
         { text: 'Format it with formatMoney', status: 'pending' },
         { text: 'Add a cart table test', status: 'pending' },
       ],
       files: ['src/cart/CartTable.ts'],
+      plan: planSteps(DEMO_PLAN),
     },
   ],
   log: [

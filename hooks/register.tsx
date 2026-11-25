@@ -4,9 +4,10 @@ import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Regist
 import type { ArtifactRow, Artifacts, Band, Observed, Summary, SummaryCache, Tab, Thread, Todo } from '../types'
 import {
   demoArtifacts, demoObserved, demoSummary, emptyObserved, hash, isTestCommand, onAgent, onArtifact, onCommit, onEdit,
-  dropEngineText, isEngineText, noticeOf, titleOf, onNotice, onError, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, short, snippet, stamp, testResult, SUMMARY_SYSTEM, summaryInput,
-  summaryPrompt, SUMMARY_OUT,
+  dropEngineText, isEngineText, noticeOf, onNotice, onError, onPlan, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, sentLabel, short, stamp, testResult, SUMMARY_SYSTEM, summaryInput,
+  summaryPrompt, SUMMARY_OUT, NAME_SYSTEM, threadName,
 } from './observe'
+import { onDevice } from './ondevice'
 
 // Change a tag when that value's fields change: it declines what an older version stored.
 const observed = atom({ plugin: 'whatcha-doing', key: 'observed' } as const, emptyObserved, { shape: 'observed-2' })
@@ -15,17 +16,10 @@ const summary = atom({ plugin: 'whatcha-doing', key: 'summary' } as const, { key
 const demo = atom({ plugin: 'whatcha-doing', key: 'isDemo' } as const, false, { shape: 'demo-1' })
 const band = atom({ plugin: 'whatcha-doing', key: 'band' } as const, { mode: 'collapsed' } as Band, { shape: 'band-2' })
 const artifacts = atom({ plugin: 'whatcha-doing', key: 'artifacts' } as const, { key: '', rows: [] } as Artifacts, { shape: 'artifacts-1' })
-// The prompt box and its hint line under the band.
-const PROMPT_ROWS = 4
-// The least body rows: enough for the Summary head, the updating bar and a few board rows.
-const MIN_BODY = 6
-/**
- * Regular body rows: 55% of a tall terminal (40+ rows); a short one may give up to 90%, less the prompt.
- * The engine caps the band at half the terminal (maxRows), so the prompt always stays on screen.
- */
-export const bodyCap = (rows: number) => Math.max(MIN_BODY, rows >= 40 ? Math.floor(rows * 0.55) : Math.floor(rows * 0.9) - PROMPT_ROWS)
-/** Compact body rows: the few most useful lines of the shown tab. */
-export const COMPACT_ROWS = 3
+/** L body rows: 20% of the terminal, at most 80 and at least 3; the engine's maxRows caps it too. */
+export const bodyCap = (rows: number) => Math.max(3, Math.min(80, Math.floor(rows * 0.2)))
+/** M body rows: the few most useful lines of the shown tab. */
+export const COMPACT_ROWS = 4
 const TABS: [Tab, string][] = [['threads', 'Threads'], ['summary', 'Summary'], ['artifacts', 'Artifacts']]
 const SIZES: [Band['mode'], string][] = [['collapsed', 'S'], ['compact', 'M'], ['expanded', 'L']]
 
@@ -126,7 +120,22 @@ export const register: Register = on => {
     const notice = noticeOf(e.text)
     if (notice || (!e.command && !e.isMeta && !isEngineText(e.text))) {
       const at = await $.clock.now()
-      await update($, observed, o => stamp(notice ? onNotice(o, notice) : onPrompt(o, e.text), at))
+      const o = await update($, observed, x => stamp(notice ? onNotice(x, notice) : onPrompt(x, e.text), at, !notice))
+      // A new thread's first prompt: the on-device model names it in the background; the prompt never waits.
+      const t = byId(o, o.current)
+      if (!notice && t && !t.name && o.log.filter(a => a.kind === 'prompt' && a.thread === t.id).length === 1) {
+        const host = {
+          plugin: { root: $.plugin.root },
+          // The engine wants a literal name here; HOME is the only one onDevice reads.
+          env: { get: () => $.env.get('HOME') },
+          fs: { read: (p: string) => $.fs.read(p), exists: (p: string) => $.fs.exists(p) },
+          process: { run: (argv: string[], opts?: { stdin?: string; timeoutMs?: number }) => $.process.run(argv, opts) },
+        } as unknown as Parameters<typeof onDevice>[0]
+        void onDevice(host, NAME_SYSTEM, e.text.slice(0, 2000))
+          .then(r => threadName(r))
+          .then(name => name === undefined ? undefined : update($, observed, x => ({ ...x, threads: x.threads.map(y => (y.id === t.id ? { ...y, name } : y)) })))
+          .catch(() => {})
+      }
     }
     return next(e)
   })
@@ -220,8 +229,7 @@ export const register: Register = on => {
     const isNarrow = cols < 120
     const status = (
       <Text wrap="truncate-end">
-        <Text color="suggestion">●</Text> now: <Text bold>{now?.title ?? 'waiting for the first prompt'}</Text>
-        <Text dimColor>  ·  {over}/{o.threads.length} threads done</Text>
+        <Text color="suggestion">●</Text> Now ({over}/{o.threads.length}): <Text bold>{now ? nameOf(now) : 'waiting for the first prompt'}</Text>
         {pct !== undefined && <Text>  ·  ~{pct}% <Text color="suggestion">{meter(pct, 5)}</Text></Text>}
       </Text>
     )
@@ -236,10 +244,10 @@ export const register: Register = on => {
         ))}
         {isOpen && tab === 'summary' && <Button key="refresh" plain label="Refresh" onPress={() => showSummary(io, true)} />}
         {isOpen && b.all && <Button key="less" plain label="Show less" onPress={() => showAll(false)} />}
-        {/* The three sizes, the shown one bold in the accent color like a tab. */}
+        {/* The three sizes, the shown one bold in the accent color like a tab; a space each side makes a 3-wide target. */}
         {SIZES.map(([mode, label]) => (
-          <Button key={`size-${mode}`} label={label} plain onPress={() => setMode(mode)}>
-            {b.mode === mode ? <Text bold color="suggestion">{label}</Text> : label}
+          <Button key={`size-${mode}`} label={` ${label} `} plain onPress={() => setMode(mode)}>
+            {b.mode === mode ? <Text bold color="suggestion">{` ${label} `}</Text> : ` ${label} `}
           </Button>
         ))}
         {/* Not "[-]": the engine draws its own [-] right after, which hides the band fully. */}
@@ -279,15 +287,25 @@ export const register: Register = on => {
 function observe(o: Observed, e: ToolCallInput, ran: ToolCallResult): Observed {
   const c = e as Record<string, unknown> & { tool: string }
   const tool = String(c.tool)
+  const str = (v: unknown) => (typeof v === 'string' ? v : undefined)
   if (tool === 'TodoWrite' && Array.isArray(c.todos)) {
-    o = onTodos(o, (c.todos as { content: string; status: Todo['status'] }[]).map(t => ({ text: t.content, status: t.status })))
+    o = onTodos(o, (c.todos as { content: string; status: Todo['status']; activeForm?: string }[]).map(t => ({ text: t.content, status: t.status, activeForm: str(t.activeForm) })))
   } else if (tool === 'TaskCreate' && typeof c.subject === 'string') {
     const id = (ran.result as { task?: { id?: string } } | undefined)?.task?.id
     const now = o.threads.find(t => t.id === o.current)?.todos ?? []
-    o = onTodos(o, [...now, { text: c.subject, status: 'pending', id }])
-  } else if (tool === 'TaskUpdate' && typeof c.status === 'string') {
-    const status = c.status === 'deleted' ? undefined : (c.status as Todo['status'])
-    o = { ...o, threads: o.threads.map(t => ({ ...t, todos: t.todos.flatMap(d => (d.id !== c.taskId ? [d] : status ? [{ ...d, status }] : [])) })) }
+    o = onTodos(o, [...now, { text: c.subject, status: 'pending', id, activeForm: str(c.activeForm), description: str(c.description) }])
+  } else if (tool === 'TaskUpdate' && typeof c.taskId === 'string') {
+    const status = c.status === 'deleted' ? undefined : (str(c.status) as Todo['status'] | undefined)
+    const edit = (d: Todo): Todo[] => {
+      if (d.id !== c.taskId) return [d]
+      if (c.status === 'deleted') return []
+      return [{ ...d, status: status ?? d.status, text: str(c.subject) ?? d.text, activeForm: str(c.activeForm) ?? d.activeForm, description: str(c.description) ?? d.description }]
+    }
+    o = { ...o, threads: o.threads.map(t => ({ ...t, todos: t.todos.flatMap(edit) })) }
+  } else if (tool === 'ExitPlanMode' || (tool === 'Write' && /\/\.claude\/plans\/[^/]+\.md$/.test(str(c.file_path) ?? ''))) {
+    // The plan is in the call (plan), or in the plan file Claude writes before asking to leave plan mode.
+    const md = str(c.plan) ?? str((ran.result as { plan?: unknown } | undefined)?.plan) ?? (tool === 'Write' ? str(c.content) : undefined)
+    if (md) o = onPlan(o, md)
   } else if (['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool) && !ran.isError) {
     const path = c.file_path ?? c.notebook_path
     if (typeof path === 'string') o = onEdit(o, path)
@@ -328,7 +346,6 @@ export const safeHref = (url: string): string | undefined => {
   if (/[\x00-\x1f\x7f-\x9f]/.test(url)) return undefined
   try { const u = new URL(url); return u.protocol === 'https:' ? u.href : undefined } catch { return undefined }
 }
-const depth = (o: Observed, t?: Thread): number => (t?.parent ? 1 + depth(o, o.threads.find(x => x.id === t.parent)) : 0)
 const byId = (o: Observed, id: number) => o.threads.find(t => t.id === id)
 const isOver = (t: Thread) => t.state === 'done' || t.state === 'answered'
 const meter = (pct: number, n: number) => '▰'.repeat(Math.round((pct / 100) * n)) + '▱'.repeat(n - Math.round((pct / 100) * n))
@@ -346,20 +363,23 @@ function body(els: Els, d: Data, act: Acts, cap: number, cols: number): JSX.Elem
   const { Box, Text } = els
   if (d.tab === 'summary') return summaryView(els, d.cache, cap, act, cols, d.now)
   if (d.tab === 'artifacts') return <Box flexDirection="column">{fit(els, artifactRows(els, d.arts, d.now, act, cols), cap, act, 'arts')}</Box>
-  const left = timeline(els, d.o, cap, act)
-  // A narrow terminal: the list goes under the graph, full width.
-  if (cols < 100) return <Box flexDirection="column">{left}<Text> </Text>{threadList(els, d.o, d.now, cols)}</Box>
-  // [graph | faint divider | table]; the divider is as tall as the taller side.
-  const leftW = Math.max(24, Math.floor(cols * 0.4))
-  const tableW = cols - leftW - 2 * DIV_GAP - 1
-  const rows = threadList(els, d.o, d.now, tableW)
-  const right = fit(els, rows.length ? rows : [<Text dimColor>Nothing yet.</Text>], cap, act, 'threads')
+  const rows = threadRows(els, d.o)
+  // A narrow terminal: the running task goes under the threads, full width.
+  if (cols < 100) {
+    const all = rows.length ? [...rows, <Text> </Text>, ...taskDetail(els, d.o, cols)] : [<Text dimColor>Nothing yet.</Text>]
+    return <Box flexDirection="column">{fit(els, all, cap, act, 'threads')}</Box>
+  }
+  // [threads | faint divider | running task]; the divider is as tall as the taller side.
+  const leftW = Math.floor(cols * 0.6)
+  const rightW = cols - leftW - 2 * DIV_GAP - 1
+  const left = fit(els, rows.length ? rows : [<Text dimColor>Nothing yet.</Text>], cap, act, 'threads')
+  const right = fit(els, taskDetail(els, d.o, rightW), cap, act, 'task')
   const tall = Math.max(left.length, right.length)
   return (
     <Box flexDirection="row" gap={DIV_GAP}>
       <Box flexDirection="column" width={leftW}>{left}</Box>
       <Box flexDirection="column" width={1}>{Array.from({ length: tall }, () => <Text dimColor>│</Text>)}</Box>
-      <Box flexDirection="column" width={tableW}>{right}</Box>
+      <Box flexDirection="column" width={rightW}>{right}</Box>
     </Box>
   )
 }
@@ -373,8 +393,11 @@ function brief(els: Els, d: Data, act: Acts, cols: number): JSX.Element[] {
   const { Text } = els
   if (d.tab === 'artifacts') return artifactRows(els, d.arts, d.now, act, cols).slice(0, COMPACT_ROWS)
   if (d.tab === 'threads') {
-    const rows = graphRows(d.o).slice(-COMPACT_ROWS).map(r => graphLine(els, r))
-    return rows.length ? rows : [<Text dimColor>Nothing yet.</Text>]
+    // The current thread's head stays pinned on top, full width; its sub rows scroll under it as work moves on.
+    const t = byId(d.o, d.o.current)
+    if (!t) return [<Text dimColor>Nothing yet.</Text>]
+    const b = threadBlock(els, d.o, t)
+    return [b.lead, ...b.sub.slice(0, COMPACT_ROWS - 1)]
   }
   const s = d.cache.summary
   if (!s) return [summaryView(els, d.cache, COMPACT_ROWS, act, cols, d.now)]
@@ -400,199 +423,135 @@ function fit({ Text, Button }: Els, lines: JSX.Element[], n: number, act: Acts, 
   return [...lines.slice(0, Math.max(0, n - 1)), <Button key={`more-${key}`} plain dimColor label={`+${lines.length - n + 1} more`} onPress={act.all} />]
 }
 
-function todoLine({ Text }: Els, d: Todo, note?: string) {
-  const [g, color] = GLYPH[d.status] ?? ['○']
-  return (
-    <Text wrap="truncate-end">
-      <Text color={color}>{g}</Text> <Text dimColor={d.status === 'completed'}>{d.text}</Text>{note && <Text dimColor>  {note}</Text>}
-    </Text>
-  )
-}
+// ---- Threads tab: each thread with its tasks and plan steps; beside it, the running task in detail ----
 
-// ---- timeline: a git graph, one lane per side-trip depth ----
+/** A thread's shown name: the on-device model's, else the title from the first prompt. */
+const nameOf = (t: Thread) => t.name ?? t.title
+const plural = (n: number, s: string) => `${n} ${s}${n === 1 ? '' : 's'}`
+const rank = (o: Observed, t: Thread) => (t.id === o.current ? 0 : isOver(t) ? 2 : 1)
+/** The current thread first, then open ones, then finished ones; newest first in each group. */
+export const ordered = (o: Observed) => [...o.threads].reverse().sort((a, b) => rank(o, a) - rank(o, b))
+const running = (t: Thread) => t.todos.find(d => d.status === 'in_progress')
 
-/** lanes: how many lanes are open on this row, so a cut end can draw them all. */
-type GraphRow = { rail: string; lanes: number; mark?: string; tone?: string; text?: string; note?: string; strong?: boolean; dim?: boolean }
-
-/**
- * Read like `git log --graph`, oldest first: every row draws every live lane. A side trip forks on its own
- * node ("├─● title"); going back merges on the next row of the thread it returns to ("├─┴─╯ ✗ tests fail").
- */
-export function graphRows(o: Observed): GraphRow[] {
-  const lane = (d: number) => '│ '.repeat(d)
-  const join = (d: number, p: number) => '─┴'.repeat(p - d - 1) + '─╯'
-  // A return also logs its prompt; the merge on the next row stands for both.
-  const events = o.log
-    .filter(a => a.kind !== 'edit' && a.kind !== 'todo')
-    .filter((a, i, all) => !(a.kind === 'prompt' && all[i - 1]?.kind === 'return' && all[i - 1]?.thread === a.thread))
-    // A tool error right after a failed test of the same thread is that failure again.
-    .filter((a, i, all) => !(a.kind === 'error' && all[i - 1]?.kind === 'test' && all[i - 1]?.thread === a.thread && all[i - 1]!.text.startsWith('tests fail')))
-    // Back-to-back test runs of one thread with the same result read as one row: "3× tests pass: …".
-    .reduce<(Observed['log'][number] & { n?: number })[]>((acc, a) => {
-      const last = acc.at(-1)
-      const fails = (x: { text: string }) => x.text.startsWith('tests fail')
-      if (a.kind === 'test' && last?.kind === 'test' && last.thread === a.thread && fails(last) === fails(a)) acc[acc.length - 1] = { ...a, n: (last.n ?? 1) + 1 }
-      else acc.push(a)
-      return acc
-    }, [])
-  // A thread's tasks sit after its last event: where it stands now.
-  const lastAt = new Map<number, number>()
-  events.forEach((a, i) => lastAt.set(a.thread, i))
-  const rows: GraphRow[] = []
-  let prev = -1 // deepest open lane
-  let merge: { d: number; p: number } | undefined // a return waiting for its thread's next row
-  let nowRow = -1
-  let lastPrompt: number | undefined // the thread of the last prompt row
-  const flush = () => {
-    if (merge) rows.push({ rail: lane(merge.d) + '├' + join(merge.d, merge.p), lanes: merge.p + 1 })
-    merge = undefined
-  }
-  // A row on lane d's rail; the first one after a return carries the merge.
-  const detail = (d: number, r: Omit<GraphRow, 'rail' | 'lanes'>) => {
-    if (merge && merge.d !== d) flush()
-    if (merge) rows.push({ ...r, rail: lane(d) + '├' + join(d, merge.p) + ' ', lanes: merge.p + 1 })
-    else rows.push({ ...r, rail: lane(d + 1), lanes: d + 1 })
-    merge = undefined
-  }
-  events.forEach((a, i) => {
-    const t = byId(o, a.thread)
-    const d = depth(o, t)
-    if (a.kind === 'return') {
-      merge = { d, p: Math.max(prev, merge?.p ?? 0) }
-      prev = d
-    } else if (a.kind === 'prompt') {
-      const p = merge?.p ?? prev
-      merge = undefined
-      if (t?.id === o.current) nowRow = rows.length
-      // A follow-up prompt in the same thread shows its own words; the thread's title already sits above it.
-      const again = t !== undefined && lastPrompt === t.id
-      lastPrompt = t?.id
-      const note = again || !t || t.state === 'active' ? '' : t.state
-      const tone = t && isOver(t) ? 'success' : undefined
-      // Fork: "├─● trip". New thread after a side trip with no return: "●─┴─╯ thread".
-      const [rail, mark] = p >= 0 && d > p ? [lane(d - 1) + '├─', '●'] : d < p ? [lane(d), '●' + join(d, p)] : [lane(d), '●']
-      rows.push({ rail, lanes: Math.max(d, p) + 1, mark, tone, text: again ? titleOf(a.text) : t?.title ?? a.text, note })
-      prev = d
-    } else {
-      const bad = a.kind === 'error' || a.text.startsWith('tests fail')
-      const mark = a.kind === 'agent' ? '◆' : a.kind === 'commit' ? '◇' : bad ? '✗' : '✓'
-      detail(d, { mark, tone: bad ? 'error' : a.kind === 'test' ? 'success' : undefined, text: a.n ? `${a.n}× ${a.text}` : a.text, dim: !bad })
-    }
-    // A thread's tasks hang off its rail after its last event.
-    if (t && lastAt.get(t.id) === i) {
-      for (const d2 of t.todos) {
-        const [g, tone] = GLYPH[d2.status] ?? ['○']
-        detail(d, { mark: g, tone, text: d2.text, dim: d2.status === 'completed' })
-      }
-    }
-  })
-  flush()
-  if (nowRow >= 0) rows[nowRow] = { ...rows[nowRow]!, strong: true, tone: 'suggestion' }
-  return rows
-}
-
-/** The graph in `cap` rows, newest at the bottom next to the prompt; a cut "earlier" end opens the pane. */
-function timeline(els: Els, o: Observed, cap: number, act: Acts): JSX.Element[] {
-  const { Text, Button } = els
-  let rows = graphRows(o)
-  const cut = Math.max(0, rows.length - (cap - 2))
-  rows = rows.slice(cut)
-  // The ends draw every lane open there; a dotted end means the graph goes on past the cut.
-  const first = rows[0]?.lanes ?? 1
-  const last = rows.at(-1)?.lanes ?? 1
-  const earlier = cut
-    ? <Button key="earlier" plain dimColor label={`${'┆ '.repeat(first)}earlier · ${cut} more`} onPress={act.all} />
-    : act.less
-      ? <Button key="earlier" plain dimColor label={`${'╷ '.repeat(first)}earlier · show less`} onPress={act.less} />
-      : <Text dimColor wrap="truncate-end">{'╷ '.repeat(first)}earlier</Text>
-  const nowEnd = <Text wrap="truncate-end"><Text dimColor>{'╵ '.repeat(last)}</Text><Text color="suggestion" bold>now</Text></Text>
-  return [earlier, ...rows.map(r => graphLine(els, r)), nowEnd]
-}
-
-function graphLine({ Text }: Els, r: GraphRow): JSX.Element {
-  return (
-    <Text wrap="truncate-end">
-      <Text dimColor>{r.rail}</Text>
-      {r.mark && <Text color={r.tone}>{r.mark} </Text>}
-      {r.text && <Text bold={r.strong} color={r.strong ? 'suggestion' : undefined} dimColor={r.dim}>{r.text}</Text>}
-      {r.note && <Text dimColor>  {r.note}</Text>}
-    </Text>
-  )
-}
-
-// ---- right of the graph: every thread in the owner's own words ----
-
-const fileName = (p: string) => p.split('/').at(-1)!
-
-/** What a thread did, in its own facts: file names, test counts, the last error, helpers, commits. */
-export function didParts(o: Observed, t: Thread): { text: string; error?: string } {
+/** "11 tests pass · 1 fails · 2 files · 1 commit": plain counts from the thread's own log, no model. */
+export function resultParts(o: Observed, t: Thread): [string, string?][] {
   const mine = o.log.filter(a => a.thread === t.id)
-  const parts: string[] = []
-  if (t.files.length) parts.push(t.files.slice(0, 3).map(fileName).join(' ') + (t.files.length > 3 ? ` +${t.files.length - 3}` : ''))
+  const out: [string, string?][] = []
   const test = mine.findLast(a => a.kind === 'test')
   if (test) {
     const m = test.text.match(/(\d+) pass, (\d+) fail/)
-    parts.push(m ? `tests ${m[1]}/${+m[1]! + +m[2]!}` : test.text.startsWith('tests fail') ? 'tests fail' : 'tests pass')
+    const bad = test.text.startsWith('tests fail')
+    if (m) out.push([`${m[1]} tests pass`, 'success'], ...(+m[2]! ? [[`${m[2]} fails`, 'error'] as [string, string]] : []))
+    else out.push([bad ? 'tests fail' : 'tests pass', bad ? 'error' : 'success'])
   }
-  const helpers = mine.filter(a => a.kind === 'agent')
-  if (helpers.length === 1) parts.push(helpers[0]!.text)
-  else if (helpers.length) parts.push(`${helpers.length} helpers`)
-  const commits = mine.filter(a => a.kind === 'commit')
-  if (commits.length === 1) parts.push(commits[0]!.text)
-  else if (commits.length) parts.push(`${commits.length} commits`)
-  const err = mine.findLast(a => a.kind === 'error')
-  return { text: parts.join(' · '), error: err?.text.replace(/^\w+: /, '') }
+  if (t.files.length) out.push([plural(t.files.length, 'file')])
+  const commits = mine.filter(a => a.kind === 'commit').length
+  if (commits) out.push([plural(commits, 'commit')])
+  return out
 }
 
-/** Thread table column widths: the tasks bar with x/y, and each time. */
-export const TASK_COL = 12
-export const WHEN_COL = 9
+/** Indents: a thread at 0, its tasks and Claude's line at 2, plan steps and results at 4, nested steps 2 deeper each. */
+const IN = (n: number) => ' '.repeat(n)
 
 /**
- * The threads as a table, under a dim header: status glyph, title, then fixed right-aligned columns
- * (Tasks, Started, Last). Under each title, dim `❯ "<prompt>"` and `⏺ <facts>`, then a red `✗ <failure>`,
- * at the title's left edge and cut before the time columns; the now thread
- * opens with its tasks one step in. The graph on the left shows the side trips, so titles are not indented.
+ * One thread as rows, each its own line: the head (glyph, name, state; progress at the right edge),
+ * `❯ <activeForm>…` of the running task, the results line, then every task, then the plan's steps.
+ * `lead` is the head; `sub` are the rest, the running task's lines first (M shows the first 3).
  */
-function threadList(els: Els, o: Observed, now: number, w: number): JSX.Element[] {
+function threadBlock(els: Els, o: Observed, t: Thread): { lead: JSX.Element; sub: JSX.Element[]; items: JSX.Element[] } {
   const { Box, Text } = els
-  if (!o.threads.length) return []
-  const cur = byId(o, o.current)
-  // The title box ends where the three columns start.
-  const titleW = Math.max(10, w - 2 - TASK_COL - 2 * WHEN_COL)
-  const cells = (tasks: string, started: string, last: string): [string, string] =>
-    [tasks.padStart(TASK_COL), started.padStart(WHEN_COL) + last.padStart(WHEN_COL)]
-  // Detail lines may run under Tasks and stop where the times start, so they never touch a time.
-  const detailW = w - 2 * WHEN_COL
-  const row = (left: JSX.Element, right?: [string, string], tone?: string, dim = false) => (
-    <Box flexDirection="row">
-      <Box width={right ? 2 + titleW : detailW}>{left}</Box>
-      {right && <Text dimColor={dim}><Text color={tone}>{right[0]}</Text><Text dimColor>{right[1]}</Text></Text>}
+  const isNow = t.id === o.current
+  const n = t.todos.length
+  const ok = t.todos.filter(d => d.status === 'completed').length
+  const steps = (t.plan ?? []).filter(s => s.mark !== '#' && s.depth === 0).length
+  const hasFail = t.todos.some(d => d.status === 'blocked')
+  const [g, tone] = isNow ? ['▸', 'suggestion'] : isOver(t) ? ['✓', 'success'] : hasFail ? ['✗', 'error'] : ['■']
+  const progress = n ? `${ok} of ${n} done` : steps ? `plan · ${plural(steps, 'step')}` : ''
+  const lead = (
+    <Box flexDirection="row" gap={2}>
+      <Box flexShrink={1}>
+        <Text wrap="truncate-end">
+          <Text color={tone}>{g}</Text> <Text bold color={isNow ? 'suggestion' : undefined}>{nameOf(t)}</Text>
+          <Text dimColor>  ·  {isNow ? 'now' : t.state}</Text>
+        </Text>
+      </Box>
+      <Box flexGrow={1} />
+      <Text dimColor>{[progress, t.sentAt === undefined ? '' : sentLabel(t.sentAt)].filter(Boolean).join('  ·  ')}</Text>
     </Box>
   )
-  const head = row(<Text dimColor>{o.threads.length} threads</Text>, cells('Tasks', 'Started', 'Last'), undefined, true)
-  return [head, ...o.threads.flatMap(t => {
-    const isNow = t === cur
-    const n = t.todos.length
-    const ok = t.todos.filter(d => d.status === 'completed').length
-    const bar = n > 5 ? meter((ok / n) * 100, 5) : '▰'.repeat(ok) + '▱'.repeat(n - ok)
-    const did = didParts(o, t)
-    const glyph = isNow ? '▾' : isOver(t) ? '✓' : t.todos.some(d => d.status === 'blocked') || did.error ? '✗' : '▸'
-    const tone = isNow ? 'suggestion' : glyph === '✓' ? 'success' : glyph === '✗' ? 'error' : undefined
-    return [
-      row(
-        <Text wrap="truncate-end"><Text color={tone}>{glyph}</Text> <Text bold={isNow} color={isNow ? 'suggestion' : undefined}>{t.title}</Text></Text>,
-        cells(n ? `${bar} ${ok}/${n}` : '', t.startedAt === undefined ? '' : ago(now - t.startedAt), isNow ? 'now' : t.lastAt === undefined ? '' : ago(now - t.lastAt)),
-        isNow ? 'suggestion' : undefined,
-      ),
-      // Claude Code's own glyphs: ❯ the owner's prompt, ⏺ what Claude did; both under the title's first letter.
-      ...(t.prompt ? [row(<Text dimColor wrap="truncate-end">  ❯ "{snippet(t.prompt)}"</Text>)] : []),
-      ...(did.text ? [row(<Text dimColor wrap="truncate-end">  ⏺ {did.text}</Text>)] : []),
-      // A failure gets its own red line under what it did, never cut into the middle of it.
-      ...(did.error ? [row(<Text color="error" wrap="truncate-end">  ✗ {did.error}</Text>)] : []),
-      ...(isNow ? t.todos.map(d => row(<Text wrap="truncate-end">    {todoLine(els, d)}</Text>)) : []),
-    ]
-  })]
+  const run = running(t)
+  const results = resultParts(o, t)
+  const lines = [
+    ...(run ? [<Text wrap="truncate-end">{IN(2)}<Text dimColor>❯ </Text><Text color="suggestion">{run.activeForm ?? run.text}…</Text></Text>] : []),
+    ...(results.length ? [
+      <Text wrap="truncate-end">{IN(4)}{results.map(([s, c], i) => <Text>{i ? <Text dimColor>{'  ·  '}</Text> : ''}<Text color={c} dimColor={!c}>{s}</Text></Text>)}</Text>,
+    ] : []),
+  ]
+  const tasks = t.todos.map(d => {
+    const [mark, color] = GLYPH[d.status] ?? ['○']
+    return <Text wrap="truncate-end">{IN(2)}<Text color={color}>{mark}</Text> <Text dimColor={d.status === 'completed'}>{d.text}</Text></Text>
+  })
+  let underHeading = false
+  const plan = t.plan?.length ? [
+    <Text dimColor wrap="truncate-end">{IN(2)}Plan · {plural(steps, 'step')}</Text>,
+    ...t.plan.map(s => {
+      if (s.mark === '#') {
+        underHeading = true
+        return <Text bold dimColor wrap="truncate-end">{IN(4)}{s.text}</Text>
+      }
+      return <Text wrap="truncate-end">{IN(4 + 2 * (s.depth + (underHeading ? 1 : 0)))}<Text dimColor>{s.mark}</Text> {s.text}</Text>
+    }),
+  ] : []
+  // M scrolls from the running task: the done ones above it are history.
+  const from = Math.max(0, t.todos.findIndex(d => d.status !== 'completed'))
+  return { lead, sub: [...lines, ...tasks.slice(from), ...plan], items: [...lines, ...tasks, ...plan] }
+}
+
+/** Every thread's rows, a blank row between threads. */
+function threadRows(els: Els, o: Observed): JSX.Element[] {
+  const { Text } = els
+  return ordered(o).flatMap((t, i) => {
+    const b = threadBlock(els, o, t)
+    return [...(i ? [<Text> </Text>] : []), b.lead, ...b.items]
+  })
+}
+
+/** Plain word wrap to `w` columns; a word longer than a line is cut. */
+export function wrap(s: string, w: number): string[] {
+  const out: string[] = []
+  let line = ''
+  for (const word of s.replace(/\s+/g, ' ').trim().split(' ')) {
+    if (line && line.length + 1 + word.length > w) { out.push(line); line = '' }
+    line = line ? `${line} ${word}` : word.slice(0, w)
+  }
+  return line ? [...out, line] : out
+}
+
+/** The current thread's running task in full: its name, Claude's activeForm, the TaskCreate description, and what is next. */
+function taskDetail(els: Els, o: Observed, w: number): JSX.Element[] {
+  const { Box, Text } = els
+  const t = byId(o, o.current)
+  if (!t) return [<Text dimColor>Nothing yet.</Text>]
+  const run = running(t)
+  const at = run ? t.todos.indexOf(run) : -1
+  const next = t.todos.find((d, i) => i > at && d.status === 'pending')?.text ?? t.plan?.find(s => s.mark !== '#')?.text
+  const kv = (k: string, v: string) => (
+    <Box flexDirection="row" gap={2}><Text dimColor>{k}</Text><Box flexShrink={1}><Text wrap="truncate-end">{v}</Text></Box></Box>
+  )
+  const head = (
+    <Box flexDirection="row" gap={2}>
+      <Box flexShrink={1}><Text bold wrap="truncate-end">Now: {run ? run.text : nameOf(t)}</Text></Box>
+      <Box flexGrow={1} />
+      {run && <Text dimColor>task {at + 1} of {t.todos.length}</Text>}
+    </Box>
+  )
+  if (!run) return [head, <Text dimColor>No task running.</Text>, ...(next ? [<Text> </Text>, kv('next', next)] : [])]
+  return [
+    head,
+    <Text bold color="suggestion" wrap="truncate-end">{run.activeForm ?? run.text}…</Text>,
+    ...(run.description ? [<Text> </Text>, ...wrap(run.description, w).map(l => <Text>{l}</Text>)] : []),
+    ...(next ? [<Text> </Text>, kv('next', next)] : []),
+  ]
 }
 
 // ---- Summary tab: Haiku's estimate, marked as one ----

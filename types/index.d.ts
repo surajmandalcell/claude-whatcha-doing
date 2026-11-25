@@ -1,5 +1,8 @@
 export type TodoStatus = 'pending' | 'in_progress' | 'completed' | 'blocked'
-export type Todo = { text: string; status: TodoStatus; id?: string }
+/** activeForm: Claude's "Building X" line while the task runs; description: what TaskCreate said to do. */
+export type Todo = { text: string; status: TodoStatus; id?: string; activeForm?: string; description?: string }
+/** One plan line: a section heading (mark "#"), or an item ("1.", "·") at its nesting depth from 0. */
+export type PlanStep = { text: string; depth: number; mark: string }
 export type Thread = {
   id: number
   title: string
@@ -11,9 +14,15 @@ export type Thread = {
   files: string[]
   /** The owner's last prompt to this thread, as typed (first 300 chars). */
   prompt?: string
+  /** A 3-6 word name the on-device model wrote from the first prompt; the title stands in without it. */
+  name?: string
+  /** The steps of the last plan Claude wrote for this thread (ExitPlanMode). */
+  plan?: PlanStep[]
   /** Milliseconds since the epoch: the first and the last thing seen on this thread. */
   startedAt?: number
   lastAt?: number
+  /** When the owner last sent a prompt to this thread (ms), shown as "sent 10:42". */
+  sentAt?: number
 }
 export type Activity = {
   kind: 'prompt' | 'return' | 'edit' | 'test' | 'error' | 'agent' | 'todo' | 'commit'
@@ -35,7 +44,7 @@ export type Summary = { percent: number; tasks: SummaryTask[]; blockers: string[
 /** startedAt: when the running Haiku call began (ms), for the progress bar. */
 export type SummaryCache = { key: string; summary?: Summary; error?: string; isLoading?: boolean; startedAt?: number }
 export type Tab = 'threads' | 'summary' | 'artifacts'
-/** The band: one row (Minimize), 2-3 body rows (Compact), opened up (Regular), or a single icon (min). all: "show all" grows the band to every row the engine gives. */
+/** The band: S one row (collapsed), M 4 body rows (compact), L opened up (expanded), or a single icon (min). all: "show all" grows the band to every row the engine gives. */
 export type Band = { mode: 'collapsed' | 'compact' | 'expanded' | 'min'; all?: boolean }/** One Artifact this project published: first seen and last published, in ms since the epoch. */
 export type ArtifactRow = { url: string; title: string; created: number; modified: number }
 /** The project's Artifacts; `key` is the `$.store` key, one per project folder. */
