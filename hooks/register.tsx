@@ -376,8 +376,10 @@ function observe(o: Observed, e: ToolCallInput, ran: ToolCallResult): Observed {
     o = onAgent(o, c.description)
   }
   const cmd = tool === 'Bash' && typeof c.command === 'string' ? c.command : ''
-  if (cmd && isTestCommand(cmd)) {
-    const r = testResult(cmd, ran.text ?? '', !!ran.isError)
+  const r = cmd && isTestCommand(cmd) ? testResult(cmd, ran.text ?? '', !!ran.isError) : undefined
+  // A failed run with no pass or fail count (a missing script, a bad path, a grep with no match) is a step
+  // that failed, not a test result: it never blocks a task, and a later working step clears it.
+  if (r && (r.isCounted || !ran.isError)) {
     o = onTest(o, r.ok, r.text)
   } else if (ran.isError && !isQuietExit(cmd, ran.text ?? '')) return onError(o, tool, ran.text ?? 'failed')
   else if (/\bgit\s+commit\b/.test(cmd)) o = onCommit(o, cmd)
@@ -515,28 +517,22 @@ function body(els: Els, d: Data, act: Acts, cap: number, cols: number, off: numb
 
 /**
  * The Compact body: the shown tab's most useful n lines. Threads: the timeline window under its pinned head.
- * Summary: the head (or the updating bar), what is active or stuck, and the work left. Artifacts: the newest one.
+ * Summary: the same board as L in n rows, as many items as fit. Artifacts: the newest one.
  */
 function brief(els: Els, d: Data, act: Acts, cols: number, off: number, n: number): JSX.Element[] {
   const { Text } = els
   if (d.tab === 'artifacts') return artifactRows(els, d.arts, d.now, act, cols).slice(0, n)
   if (d.tab === 'threads') return threadWindow(els, d.o, off, cols).slice(0, n)
-  const s = d.cache.summary
-  if (!s) return [summaryView(els, d.cache, n, act, cols, d.now)]
-  const names = (st: string) => s.tasks.filter(t => t.status === st).map(t => t.name)
-  const stuck = names('blocked')
-  return [
-    <Text wrap="truncate-end">
-      <Text bold>~{s.percent}% done</Text> <Text color="suggestion">{meter(s.percent, 10)}</Text><Text dimColor>  Haiku's estimate</Text>
-    </Text>,
-    d.cache.isLoading ? updatingBar(els, d.cache, cols, d.now) : (
-      <Text wrap="truncate-end">
-        <Text color="suggestion">●</Text> Active: {names('active').join('  ·  ') || 'nothing'}
-        {stuck.length > 0 && <Text color="error">  ✗ Stuck: {stuck.join('  ·  ')}</Text>}
-      </Text>
-    ),
-    <Text dimColor wrap="truncate-end">Work left: {s.remaining.join('  ·  ') || 'nothing'}</Text>,
-  ]
+  return [summaryView(els, d.cache, n, act, cols, d.now)]
+}
+
+/** Whole items (each one or more lines) in at most n rows; the last row says how many items were cut. */
+function fitItems(els: Els, items: JSX.Element[][], n: number, act: Acts, key: string): JSX.Element[] {
+  if (items.flat().length <= n) return items.flat()
+  const out: JSX.Element[] = []
+  let k = 0
+  while (k < items.length && out.length + items[k]!.length <= n - 1) out.push(...items[k++]!)
+  return [...out, <els.Button key={`more-${key}`} plain dimColor label={`+${items.length - k} more`} onPress={act.all} />]
 }
 
 /** At most n rows; the last one says how many were cut, and a press shows them all. */
@@ -717,6 +713,9 @@ function threadWindow(els: Els, o: Observed, off: number, cols: number): JSX.Ele
 
 // ---- Summary tab: Haiku's estimate, marked as one ----
 
+/** Summary board: a column needs about 30 characters; columns sit 3 apart. */
+export const BOARD_MIN = 30
+const BOARD_GAP = 3
 const ORDER: [Summary['tasks'][number]['status'], string, string?][] = [
   ['completed', 'Done', 'success'], ['active', 'Active', 'suggestion'], ['blocked', 'Stuck', 'error'], ['remaining', 'Left'],
 ]
@@ -750,22 +749,42 @@ function summaryView(els: Els, c: SummaryCache, cap: number, act: Acts, cols: nu
   // The bar takes a row of the board's room while it shows.
   const bar = c.isLoading ? updatingBar(els, c, cols, now) : undefined
   if (bar) cap -= 1
-  // Board: one group a row at the full width, like Threads, each task and its plain line on one row, so a
-  // line is never cut in a narrow column ("fix committ…"); work left is the last row.
-  const linesOf = ([st, label, tone]: (typeof ORDER)[number]) => {
+  // Board: 4 columns across when each gets BOARD_MIN, else 2 x 2, else 1; columns in a row share the width.
+  const across = cols >= 4 * BOARD_MIN + 3 * BOARD_GAP ? 4 : cols >= 2 * BOARD_MIN + BOARD_GAP ? 2 : 1
+  const w = Math.floor((cols - BOARD_GAP * (across - 1)) / across)
+  // In a column a name and its plain line each wrap to 2 lines, then cut, so "fix committ…" reads whole; one
+  // column has the full width, so a task and its plain line share one row.
+  const two = (x: string) => twoLines(x, w - 2).filter((l): l is string => !!l)
+  const linesOf = ([st, label, tone]: (typeof ORDER)[number], isTight = false) => {
     const tasks = s.tasks.filter(t => t.status === st)
     const mark = <Text color={GLYPH[st]?.[1]}>{GLYPH[st]?.[0]}</Text>
+    // Items, each its lines: the label, then a task (name and plain line), then each blocker.
     return [
-      <Text bold color={tone}>{label} {tasks.length}</Text>,
-      ...tasks.map(t => <Text wrap="truncate-end">{mark} {t.name}<Text dimColor>  {t.eli5}</Text></Text>),
-      ...(st === 'blocked' ? s.blockers.map(x => <Text color="error" wrap="truncate-end">  why: {x}</Text>) : []),
+      [<Text bold color={tone}>{label} {tasks.length}</Text>],
+      ...tasks.map(t => across === 1 || isTight
+        ? [<Text wrap="truncate-end">{mark} {t.name}{across === 1 && <Text dimColor>  {t.eli5}</Text>}</Text>]
+        : [
+          ...two(t.name).map((l, i) => (i ? <Text>  {l}</Text> : <Text>{mark} {l}</Text>)),
+          ...two(t.eli5).map(l => <Text dimColor>  {l}</Text>),
+        ]),
+      ...(st === 'blocked' ? s.blockers.map(x => across === 1 || isTight
+        ? [<Text color="error" wrap="truncate-end">  why: {x}</Text>]
+        : two(`why: ${x}`).map(l => <Text color="error">  {l}</Text>)) : []),
     ]
   }
-  const groups = ORDER.map(g => [g[0], linesOf(g)] as const)
-  // Every group gets all it needs when the board fits under the head and the work-left row; else an even share.
+  const board = (isTight: boolean) => Array.from({ length: Math.ceil(ORDER.length / across) }, (_, i) => ORDER.slice(i * across, (i + 1) * across).map(g => [g[0], linesOf(g, isTight)] as const))
+  const needsOf = (b: ReturnType<typeof board>) => b.map(g => Math.max(...g.map(([, l]) => l.flat().length)))
+  // Every row gets all it needs when the board fits under the head and the work-left row. Else (M) each task
+  // takes one row, name only, and the rows share the room evenly: as many tasks as fit.
+  const fits = needsOf(board(false)).reduce((a, b) => a + b, 0) <= cap - 2
+  const groups = board(!fits)
+  const needs = needsOf(groups)
   const even = Math.max(2, Math.floor((cap - 2) / groups.length))
-  const fits = groups.reduce((a, [, l]) => a + l.length, 0) <= cap - 2
-  const rows = groups.map(([st, lines]) => <Box flexDirection="column" width={cols}>{fit(els, lines, fits ? lines.length : even, act, `board-${st}`)}</Box>)
+  const rows = groups.map((group, i) => (
+    <Box flexDirection="row" gap={BOARD_GAP}>
+      {group.map(([st, lines]) => <Box flexDirection="column" width={w}>{fitItems(els, lines, fits ? needs[i]! : even, act, `board-${st}`)}</Box>)}
+    </Box>
+  ))
   return (
     <Box flexDirection="column">
       {head}

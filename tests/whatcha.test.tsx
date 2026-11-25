@@ -287,11 +287,11 @@ test('sizes: S is the one row, M the 6 most useful lines of the tab, L up to 20%
   await ui.press({ key: 'bottom' })
   expect(screen(await band(), 150)).toEqual(m)
   await ui.press({ key: 'tab-summary' }) // a tab keeps the band compact
-  expect(await rows()).toEqual([
-    "~29% done ▰▰▰▱▱▱▱▱▱▱  Haiku's estimate",
-    expect.stringMatching(/^● Active: .+  ✗ Stuck: /),
-    expect.stringMatching(/^Work left: /),
-  ])
+  // M shows the same columns as L, one row per task: head, 4 board rows, work left.
+  const sum = screen(await band(), 150).slice(2)
+  expect(sum).toHaveLength(6)
+  expect(sum[1]).toMatch(/^Done 2 +Active 1 +Stuck 1 +Left 3$/)
+  expect(sum[5]).toMatch(/^Work left: /)
   await ui.press({ key: 'tab-artifacts' })
   const arts = await rows()
   expect(arts).toHaveLength(6)
@@ -312,20 +312,34 @@ test('sizes: S is the one row, M the 6 most useful lines of the tab, L up to 20%
   await short.unmount()
 })
 
-test('Summary board: one group a row at the full width, like Threads, so no plain line is cut in a narrow column', async ($, on) => {
+test('Summary board: 4 columns at 150, 2 x 2 at 100, 1 at 60; long lines wrap to 2 in a column; M keeps 6 rows', async ($, on) => {
   engine(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.command.run(whatcha('demo'))
   await $.command.run(whatcha('summary'))
-  // The board is [head, ...one row per group, work left]; each group row carries the full width.
+  // The board is [head, ...rows of columns, work left]; each column is about 30+ characters wide.
   const board = async (columns: number) => {
     const ui = await $.ui.mount(BAND(50, columns))
-    const kids = bodyOf(await ui.drawn()).children as unknown as { props: { width: number } }[]
+    const tree = await ui.drawn()
+    const kids = bodyOf(tree).children as unknown as { children: { props: { width: number } }[] }[]
+    const shown = screen(bodyOf(tree), columns - 5)
     await ui.unmount()
-    return kids.slice(1, -1).map(r => r.props.width)
+    return { widths: kids.slice(1, -1).map(r => r.children.map(c => c.props.width)), shown }
   }
-  expect(await board(160)).toEqual([155, 155, 155, 155])
-  expect(await board(65)).toEqual([60, 60, 60, 60])
+  const wide = await board(150)
+  expect(wide.widths).toEqual([[34, 34, 34, 34]])
+  // "Waiting on the one-cent receipt fix." is wider than its column: it wraps to a second line, never "fix…".
+  expect(wide.shown.join('\n')).toMatch(/Waiting on the one-cent/)
+  expect(wide.shown.join('\n')).not.toMatch(/…/)
+  expect((await board(100)).widths).toEqual([[46, 46], [46, 46]])
+  expect((await board(60)).widths).toEqual([[55], [55], [55], [55]])
+  // M: 6 rows, the same 4 columns, as many items as fit.
+  await $.command.run(whatcha('compact'))
+  const m = await $.ui.mount(BAND(50, 150))
+  const rows = screen(bodyOf(await m.drawn()), 145)
+  expect(rows).toHaveLength(6)
+  expect(rows[1]).toMatch(/^Done 2 +Active 1 +Stuck 1 +Left \d/)
+  await m.unmount()
 })
 
 test('Haiku runs only on the Summary tab, once per state', async ($, on) => {
@@ -498,10 +512,10 @@ test('Replay: every prompt lands as a thread, tangent, nested step or return, an
 
   await ui.press({ key: 'tab-summary' })
   const sent = m.sent()
-  // The compact digest: one line per thread with its side-trip parent and counts, then the last test.
+  // The compact digest: one line per thread with its side-trip parent and counts, then the current thread's last test.
   expect(sent).toContain('#1 Add dark mode option src/settings.js [done] 1 files\n#2<1 Why CI workflow fail repo [answered]\n')
   expect(sent).toContain('#3<2 Bump node CI workflow 22 [done] 1 files\n#4 Write short release notes 0.4.0 CHANGEL… [done] 1 files')
-  expect(sent).toContain('now #4\ntest: pass npm test: 2 pass, 0 fail')
+  expect(sent).toContain('now #4\n\nReply') // npm test ran in another thread: no test line
   await ui.unmount()
 })
 
@@ -852,5 +866,26 @@ test('view per project: a project saves its own view, starting from the global o
   await ui.press({ key: 'size-collapsed' })
   expect(store['view:/p']).toEqual({ mode: 'collapsed', raw: false, tab: 'threads' })
   expect(store['view']).toEqual({ mode: 'compact', raw: false, tab: 'threads' }) // the global view stays
+  await ui.unmount()
+})
+
+test('false stuck 2: a test script that fails to start, fixed by another command, never blocks its task', async ($, on) => {
+  const m = engine(on, e => {
+    const c = String(e.command ?? '')
+    return c === 'npm test' ? 'Exit code 1\nnpm error Missing script: "test"' : c.includes('| grep') ? 'Exit code 1\n' : 'ok'
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'set up the test script for the band', wait: false, origin: { kind: 'composer' } } as never)
+  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'Setup test script', status: 'in_progress', activeForm: 'Setting up the test script' }] } as never)
+  await $.tool.call({ tool: 'Bash', command: 'npm test' } as never) // no script yet: a failed step, not a failed test
+  await $.tool.call({ tool: 'Bash', command: 'npm pkg set scripts.test="node --test"' } as never) // the fix, no commit
+  await $.tool.call({ tool: 'Bash', command: 'claude plugin test . 2>&1 | grep -E "^\\(fail\\)"' } as never) // no failures: grep finds nothing
+  const ui = await $.ui.mount(BAND())
+  await ui.press({ key: 'tab-threads' })
+  const rows = timeline(await ui.drawn())
+  expect(rows.some(r => r.includes('✗'))).toBe(false)
+  await ui.press({ key: 'tab-summary' })
+  expect(m.sent()).toContain(' doing: Setup test script')
+  expect(m.sent()).not.toMatch(/error:|test: fail|stuck:/)
   await ui.unmount()
 })

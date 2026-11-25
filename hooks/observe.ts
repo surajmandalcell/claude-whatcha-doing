@@ -243,7 +243,7 @@ export function testResult(cmd: string, out: string, isError: boolean) {
   const counts = pass !== undefined || fail !== undefined ? `${pass ?? 0} pass, ${fail ?? 0} fail` : ''
   // Only the test run of a chain: "sed -n 4p x; tsc -p . && npm test" reads as "npm test" (the last test run, so "tsc && npm test" names npm test).
   const run = cmd.split(/;|&&|\|\||\|/).map(s => s.replace(/\s*2>&1\s*/g, ' ').trim()).filter(isTestCommand).at(-1) ?? cmd.trim()
-  return { ok, text: [run, counts].filter(Boolean).join(': ') }
+  return { ok, text: [run, counts].filter(Boolean).join(': '), isCounted: !!counts }
 }
 
 /** A failed test run marks the current thread's running todo as blocked; a passing one unblocks it. */
@@ -373,7 +373,9 @@ export function summaryInput(o: Observed): string {
   })
   const lines = blocks.reverse().flat()
   lines.push(`now #${o.current}`)
-  if (o.lastTest) lines.push(`test: ${o.lastTest.ok ? 'pass' : 'fail'} ${short(o.lastTest.text, 40)}`)
+  // Only the current thread's last run: an old failure elsewhere is no reason to call anything stuck.
+  const test = o.log.findLast(a => a.kind === 'test' && a.thread === o.current)
+  if (test) lines.push(`test: ${test.text.startsWith('tests pass') ? 'pass' : 'fail'} ${short(test.text.replace(/^tests (pass|fail): /, ''), 40)}`)
   const err = o.log.findLast(a => a.kind === 'error' && a.thread === o.current)
   if (err) lines.push(`error: ${short(err.text, 60)}`)
   // A long session drops its oldest lines: 1800 chars plus the ~460 of the prompt stays under 600 tokens.
