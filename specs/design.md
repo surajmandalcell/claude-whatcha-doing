@@ -25,9 +25,10 @@ All looks are settled. Nothing is open.
   the band moves it a row a tick (`ui.scroll`, the engine's own window stays put). An arrow that cannot
   move is dim. The band opens on the newest rows, so new events stay in view; a size or tab change goes
   back there. Threads never ends in "+N more": every row is reachable by scrolling.
-- **Layout**: each meta cell is a fixed-width box that never shrinks; the name box grows and shrinks
-  (`minWidth 0`) and is cut with "…" at the first cell, so a long name never moves a ┊ and no cell
-  wraps. Every row is exactly one line.
+- **Layout**: every Threads row, thread rows and sub rows alike, keeps 2 columns at the right: tests ┊
+  time. Each is a fixed-width box that never shrinks; the text box grows and shrinks (`minWidth 0`) and is
+  cut with "…" at the first ┊, so no text runs into or under the columns, every ┊ sits in the same place
+  top to bottom, and every row is exactly one line.
 - **Full width**: titles, test runs, commits and errors are kept up to 200 characters, so every row is cut
   only at the real right edge of the band or its column. A test row names only the test run of a chain
   (`sed …; tsc && claude plugin test .` reads `claude plugin test .`). A title drops a leading list mark or
@@ -45,28 +46,31 @@ All looks are settled. Nothing is open.
   top like the chat: finished ones, then open ones, the current one last, oldest first in each group. Every thread is expanded,
   and every task and plan step has its own row. Indents show the hierarchy:
   1. col 0: the head, `▸` now (accent), `✓` done, `✗` a stuck task, `⏸` paused (the same glyphs in S, M
-     and L); the name in bold, taking all the width up to the first meta column. Then 3 **meta columns**,
-     each right-aligned and as wide as its longest cell on any thread, so they line up down the list:
-     tests (`11 pass` green, `· 1 fail` red) | `sent 10:42` (the local clock time of the owner's last
-     prompt to the thread, `sentAt`) | `res 10:49` (when Claude's reply to that prompt ended, `resAt`, at
-     the main loop's `turn.complete`; empty while it still works). Live, the times come from
-     `prompt.submit` and `turn.complete`; rebuilt threads take them from the `timestamp` of each line in
-     the session's transcript file (`~/.claude/projects/<cwd>/<session id>.jsonl`, its last 4 MB): the
-     prompt's line, and the last `end_turn` reply before the next prompt. A column empty on every
-     thread drops. A ` ┊ ` in `#3a3a3a`, much fainter than dim, separates the columns. No model;
+     and L); the name in bold, taking all the width up to the first ┊. Then the 2 **columns**, on every
+     row of the timeline, right-aligned:
+     - tests: `18✓ 1✗`, the pass count and ✓ green, the fail count and ✗ red, no words; 3 digits kept for
+       each (1000 and up reads `1.2k`), and the column grows to its longest cell, the same on every row.
+       Empty with no run, or a run with no count read. A thread row shows its last run; a test sub row its own.
+     - time: `10:42`, dim. A thread row shows when the owner last sent it a prompt (`sentAt`); each sub row
+       when it happened (an edit, a commit, a test run, a helper finishing, a later prompt), so the
+       column fills top to bottom. Live, times come from `prompt.submit` and `tool.call`; rebuilt threads
+       take them from the `timestamp` of each line in the session's transcript file
+       (`~/.claude/projects/<cwd>/<session id>.jsonl`, its last 4 MB): the prompt's line, and each tool
+       result's line by its `tool_use_id`.
+     A ` ┊ ` in `#3a3a3a`, much fainter than dim, separates the columns. No model;
   2. col 2: `Plan · N steps`; only the current thread's plan unfolds at col 4: section headings bold and
      dim, items under them at col 6 with their own number (`1.`) or `·`, each nested level 2 deeper;
   3. col 2: each task, `✓` done (dim), `●` running, `○` to do, `✗` stuck; its subject only. A thread with
      no tasks shows its last 3 things done instead, newest lowest: `✎ spec/icons.md` edits, `✓`/`✗` test
-     runs, `◆` commits, `↳` helpers, each with its time;
-  4. col 2: each later prompt to the thread, `› <prompt> · 12:07` (the last 3, newest lowest), shown at
-     `prompt.submit`; up to 2 rows each at the full width, cut with "…" at the end of the second;
+     runs, `◆` commits, `↳` helpers; their time and counts in the columns;
+  4. col 2: each later prompt to the thread, `› <prompt>` (the last 3, newest lowest), shown at
+     `prompt.submit`; up to 2 rows each, wrapped inside the left area, cut with "…" at the end of the second;
   5. col 2: `❯ <activeForm>…` of the running task (accent), word for word from TaskCreate or TodoWrite,
      the lowest row, like the chat's spinner.
-  The first prompt has no row: the thread's name and `sent` cell point back to it. The tests cell
-  always has a count (`3 pass`); a run with no count read leaves it empty.
+  The first prompt has no row: the thread's name and time point back to it.
 - **Thread names**: a thread's name is its first prompt, cleaned: no tags (`[Image #1]`, `[Pasted text
-  #2]`), links, absolute paths, list marks or cues (`okay so`, `wait,`, `new thing:`), at the full width
+  #2]`, engine wrappers like `<pasted_content id="384e">` with the text inside kept), links, absolute
+  paths, list marks or cues (`okay so`, `wait,`, `new thing:`), at the full width
   up to the first meta cell. Only when nothing is left (a prompt of tags, links and paths) does the
   on-device name stand in: the first prompt goes to Apple's on-device model (FoundationModels, via
   `helper/ondevice.swift`) in the background after `prompt.submit`, never blocking it; its 3-6 word
@@ -79,8 +83,10 @@ All looks are settled. Nothing is open.
 - **History**: when the mod loads mid-session (a reload, a resume) and the transcript
   (`$.session.messages()`, newest 4096 messages) has more prompts than the band saw (or the band has prompts without times), the threads are
   rebuilt from it: prompts, tasks, plans, test runs, commits and edits, the last 200 prompts at most.
-  Names of known threads stay. The messages have no times, so `sent` and `res` come from the `.jsonl`
-  file's tail, read with `tail -c 4000000` (`$.fs.read` stops at 4 MiB), each prompt matched by its text.
+  Names of known threads stay. The messages have no times, so the times come from the `.jsonl`
+  file's tail, read with `tail -c 4000000` (`$.fs.read` stops at 4 MiB), each prompt matched by its text. The
+  compaction summary ("This session is being continued from a previous conversation…") is engine text,
+  never a prompt: its work stays in the thread before it, or "Earlier work".
 - **Plans**: the ExitPlanMode call's plan markdown, or the plan file Claude writes under
   `~/.claude/plans/`, is parsed into steps and stored on the current thread. Numbered (`1.`, `1)`) and
   bulleted items keep their nesting; a wrapped item's next lines join it; headings stay as section
