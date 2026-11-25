@@ -118,13 +118,14 @@ All looks are settled. Nothing is open.
   bulleted items keep their nesting; a wrapped item's next lines join it; headings stay as section
   labels; prose, code blocks and headings with no items under them drop.
 - **Summary tab**: Haiku's estimate, marked as an estimate (`~38% done ▰▰▰▰▱▱▱▱▱▱ estimate: Haiku's
-  guess…`), then a board of Done, Active, Stuck, Left, each task with one plain line, blockers in red,
+  guess…`), then a kanban board of Left, Active, Stuck and Done, left to right, each task with one plain line, blockers in red,
   and one full-width "Work left" row. Columns by band width, each at least 30 wide with 3-column gaps:
-  4 across from 129, 2 x 2 from 63, else 1 (150 cols: 4, 100: 2 x 2, 60: 1). In a column a task name and
+  4 across from 129, 2 x 2 from 63 (Left, Active on top; Stuck, Done below), else 1 in the same order
+  (150 cols: 4, 100: 2 x 2, 60: 1). In a column a task name and
   its plain line each wrap to 2 lines, then cut with "…"; with one column they share one row. A cut
   column ends in "+N more" (whole tasks). All 4 headers always show; an empty column has one dim line:
-  `nothing finished yet`, `nothing running`, `✓ nothing stuck` (✓ green), `nothing left`. In one column the
-  empty groups share one line (`Stuck: nothing  ·  Left: nothing`). Like a kanban, every column lists the newest first:
+  `nothing left`, `nothing running`, `✓ nothing stuck` (✓ green), `nothing finished yet`. In one column the
+  empty groups share one line (`Stuck: nothing  ·  Done: nothing`). Like a kanban, every column lists the newest first:
   Haiku names each task's source (`#3` a thread, `#3.2` its 2nd todo), and the band sorts by that todo's last
   change, else the thread's last time, else the newer thread and later todo; "+N more" cuts the oldest.
   While Haiku runs, a thin bar (`━━━╸────  updating with Haiku  3 s`) sits under the head and fills over
