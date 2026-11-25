@@ -1,119 +1,124 @@
-![Watcha Doing Claude: the Threads tab, each thread with its tasks and plan on the left, the running task on the right](docs/threads.png)
+<p align="center">
+  <img src="docs/threads.png" alt="Watcha Doing Claude: the band above the Claude Code prompt, with the Threads tab open" width="880">
+</p>
 
-<div align="center">
+<p align="center">
+  <b>See what each Claude Code tab is doing. Right above the prompt.</b><br>
+  Your prompts, Claude's tasks, and what passed or failed, in one band.
+</p>
 
-A band above the Claude Code prompt that shows what you asked each session and what it actually did.
+<p align="center">
+  <a href="#install"><b>Install</b></a> &nbsp;·&nbsp;
+  <a href="#how-to-use">How to use</a> &nbsp;·&nbsp;
+  <a href="https://github.com/surajmandalcell/claude-whatcha-doing/issues">Report a problem</a>
+</p>
 
-[![Claude Code mod](https://img.shields.io/badge/Claude_Code-mod-d97757)](https://github.com/surajmandalcell/claude-whatcha-doing)
-[![version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsurajmandalcell%2Fclaude-whatcha-doing%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&color=blue)](.claude-plugin/plugin.json)
-[![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+<p align="center">
+  <a href="https://github.com/surajmandalcell/claude-whatcha-doing"><img src="https://img.shields.io/badge/Claude_Code-mod-d97757" alt="Claude Code mod"></a>
+  <a href=".claude-plugin/plugin.json"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsurajmandalcell%2Fclaude-whatcha-doing%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&color=blue" alt="version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license"></a>
+</p>
 
-</div>
+## Why whatcha-doing
 
-## Why
+You keep many Claude Code tabs open, and they often do similar jobs. After a while you cannot tell which tab is which.
 
-You keep many Claude Code tabs open, and they often do similar jobs. After a while you cannot tell which tab
-is which. whatcha-doing shows, at a glance, what you asked each session, what it did, and what failed.
+- **One look.** The band names what you asked this tab and what it did.
+- **Your words.** Rows use your prompts, file names, test counts and errors, not generic labels.
+- **Out of the way.** One status row by default. Hide it with `▾`.
+- **Cheap.** No model runs unless you open Summary.
 
 ## Features
 
 | | |
-|---|---|
-| ![Collapsed status row](docs/collapsed.png) | ![Summary board](docs/summary.png) |
-| **Status row.** By default the band is one row: `Now (2/4): <thread>`, how many of the threads are done, and, once you open Summary, a percent-done estimate. | **Summary.** One Haiku call sorts the tasks into Done, Active, Stuck and Left, each with a one-line note. |
-| ![Artifacts list](docs/artifacts.png) | ![Minimized band](docs/minimized.png) |
-| **Artifacts.** The pages this project published, newest change first. A click on the name copies the link; the link opens on click. | **Minimized.** `▾` shrinks the band to `▴ @whatcha-doing` on the right. |
-| ![Show all](docs/show-all.png) | |
-| **Show all.** A long list ends in "+N more". A click grows the band to show everything; `Show less` goes back. | |
+| --- | --- |
+| **Threads** | A timeline of your prompts, grouped into threads. Under each one: Claude's tasks, plan steps and recent work. Newest at the bottom. Columns show the time you sent it, commits, files and tests (`11 pass · 1 fail`). |
+| **Summary** | Haiku's estimate of how far along the work is, as Done, Active, Stuck and Left. |
+| **Artifacts** | Every page this project published, newest first. Click a name to copy its link. |
+| **Thread names** | On a Mac with Apple Intelligence, the on-device model names each thread in 3 to 6 words. |
 
-**Threads** is one timeline of every thread, newest first, the current one on top. Each thread shows its tasks
-and plan steps, one row each, indented thread > task > step, so you see what was said and done before.
-Each thread row ends in lined-up columns: the time you sent its last prompt (`sent 10:42`) | commits | files |
-tests (`11 pass · 1 fail`). Under each thread: your later prompts (`› keep it narrow · 12:07`), what Claude is
-doing now (`❯`), then its tasks, or with no tasks its last edits, test runs and commits. Loaded in the
-middle of a session, the band rebuilds the threads from the transcript (the last 200 prompts).
-▲ ▼ scroll the timeline; the top row always names the thread you are in. Plans from plan mode are parsed into steps. On a Mac with
-Apple Intelligence, the on-device model names each new thread in 3-6 words; it runs on your Mac, nothing is sent.
+| Status row | Summary | Artifacts |
+| :---: | :---: | :---: |
+| <img src="docs/collapsed.png" alt="The band as one status row" width="280"> | <img src="docs/summary.png" alt="The Summary tab" width="280"> | <img src="docs/artifacts.png" alt="The Artifacts tab" width="280"> |
 
 ## Install
 
-At the prompt of a Claude Code terminal session:
+At the prompt of a Claude Code session:
 
 ```
 /plugin install whatcha-doing --marketplace surajmandalcell/claude-whatcha-doing
 ```
 
-Answer `y` to add the marketplace, then pick a scope (user scope loads it in every session). The band shows at once.
+Answer `y` to add the marketplace, then pick a scope. User scope loads it in every session. The band shows at once.
 
-From a shell:
+<details>
+<summary>From a shell, and auto-update</summary>
+
+<br>
 
 ```sh
 claude plugin install whatcha-doing --marketplace surajmandalcell/claude-whatcha-doing
 ```
 
-For development, load it from a clone. For one session:
-
-```sh
-claude --plugin-dir /path/to/claude-whatcha-doing
-```
-
-For every session, add the folder to the `env` block of `~/.claude/settings.json`. Saving a file then reloads the mod:
-
-```json
-"CLAUDE_CODE_PLUGIN_DIRS": "/path/to/claude-whatcha-doing"
-```
-
-## Usage
-
-The band is driven with the mouse: click the tabs and buttons. Keys still go to the prompt.
-
-| Command | What it does |
-|---|---|
-| `/whatcha open` or `/whatcha threads` | Open the Threads tab |
-| `/whatcha summary` | Open the Summary tab |
-| `/whatcha artifacts` | Open the Artifacts tab |
-| `/whatcha compact` | M: 5 rows of the Threads timeline, the thread's name pinned on top; ▲ ▼ scroll |
-| `/whatcha all` | Show everything, no height limit |
-| `/whatcha close` | S: back to the one status row |
-| `/whatcha min` | Hide to `▴ @whatcha-doing` |
-| `/whatcha demo`, `/whatcha live` | Show sample data, or go back to this session |
-
-The header buttons S, M and L pick the size: S is one row, M is 5 lines, L is 20% of the terminal rows (3 to 22), within the half Claude Code gives the band. Set `WHATCHA_DEMO=1` to start in demo mode.
-
-## Haiku budget
-
-Only the Summary tab calls a model. It runs only when you open Summary or click ↻ (refresh), never on its own.
-One call is at most 600 tokens in and 250 tokens out, and the answer is cached until the session changes.
-Everything else is built from hooks alone, with no model call.
-
-## Privacy
-
-The Summary call sends a short digest: thread titles and task names (each cut to 40 characters), their states,
-file and commit counts, and the last test and error line. Nothing from the transcript is sent: no full prompts,
-no replies, no file contents. The Artifacts list is kept in the mod's local store, one
-list per project folder. Nothing leaves your machine except that one Haiku call.
-
-## Updates
-
-Turn on auto-update once: `/plugin`, then Marketplaces, `claude-whatcha-doing`, Enable auto-update.
-Claude Code then fetches each new version when it starts. To update by hand:
+To get new versions on start, run `/plugin`, open Marketplaces, pick `claude-whatcha-doing`, and turn on auto-update. To update by hand:
 
 ```sh
 claude plugin marketplace update claude-whatcha-doing
 claude plugin update whatcha-doing@claude-whatcha-doing
 ```
 
+</details>
+
+## How to use
+
+Click the tabs and buttons in the band. Your keys still go to the prompt.
+
+| Size | What it shows |
+| --- | --- |
+| **S** | One status row: `▸ Now (2/4): <your last prompt>` |
+| **M** | 5 rows of the open tab |
+| **L** | Up to 22 rows, or 20% of the screen |
+| **▾** | Hides the band to `▴ @whatcha-doing` |
+
+In M and L, `▲ ▼` scroll the Threads timeline a page, and `⤒ ⤓` jump to the oldest or newest row. The mouse wheel works too.
+
+<details>
+<summary>Slash commands</summary>
+
+<br>
+
+| Command | What it does |
+| --- | --- |
+| `/whatcha threads` | Open Threads |
+| `/whatcha summary` | Open Summary |
+| `/whatcha artifacts` | Open Artifacts |
+| `/whatcha compact` | Size M |
+| `/whatcha close` | Size S |
+| `/whatcha min` | Hide the band |
+| `/whatcha all` | Show every row, no height limit |
+| `/whatcha demo`, `/whatcha live` | Show sample data, or go back to this session |
+
+Set `WHATCHA_DEMO=1` to start in demo mode.
+
+</details>
+
+## How it works
+
+- **Hooks, no model.** Threads and Artifacts are built from Claude Code's own events. Loaded mid-session, the band rebuilds the threads from the transcript.
+- **Haiku runs only on Summary.** It runs when you open that tab or click ↻, never on its own. One call is at most 600 tokens in and 250 out, and the answer is cached until the session changes.
+- **Haiku sees a short digest.** Thread and task names (cut to 40 characters), their states, file and commit counts, and the last test and error line. No full prompts, replies or file contents.
+- **Thread names stay on your Mac.** Apple's on-device model writes them. Nothing is sent.
+- **Artifacts stay local.** The list is kept in the mod's local store, one list per project folder.
+
 ## Develop
 
 ```sh
-claude plugin validate .
-claude plugin test .
-zsh scripts/release.zsh   # checks, bumps the patch version, commits and pushes
+claude --plugin-dir /path/to/claude-whatcha-doing   # load a clone for one session
+claude plugin validate . && claude plugin test .
+zsh scripts/release.zsh                              # checks, bumps the version, commits and pushes
 ```
 
-Installed copies update only when the version in `.claude-plugin/plugin.json` changes, so release with the script.
-
-The design notes are in [specs/design.md](specs/design.md).
+Installed copies update only when the version in `.claude-plugin/plugin.json` changes. Design notes are in [specs/design.md](specs/design.md).
 
 ## License
 
