@@ -291,7 +291,7 @@ test('sizes: S is the one row, M the 6 most useful lines of the tab, L up to 20%
   // M shows the same columns as L, one row per task: head, 4 board rows, work left.
   const sum = screen(await band(), 150).slice(2)
   expect(sum).toHaveLength(6)
-  expect(sum[1]).toMatch(/^Done 2 +Active 1 +Stuck 1 +Left 3$/)
+  expect(sum[1]).toMatch(/^Left 3 +Active 1 +Stuck 1 +Done 2$/)
   expect(sum[5]).toMatch(/^Work left: /)
   await ui.press({ key: 'tab-artifacts' })
   const arts = await rows()
@@ -339,7 +339,7 @@ test('Summary board: 4 columns at 150, 2 x 2 at 100, 1 at 60; long lines wrap to
   const m = await $.ui.mount(BAND(50, 150))
   const rows = screen(bodyOf(await m.drawn()), 145)
   expect(rows).toHaveLength(6)
-  expect(rows[1]).toMatch(/^Done 2 +Active 1 +Stuck 1 +Left \d/)
+  expect(rows[1]).toMatch(/^Left \d +Active 1 +Stuck 1 +Done 2/)
   await m.unmount()
 })
 
@@ -976,17 +976,21 @@ test('Summary board: every column header shows; an empty one says so in one dim 
     return rows
   }
   const wide = await draw(150)
-  expect(wide[1]).toMatch(/^Done 0 +Active 1 +Stuck 0 +Left 1$/)
-  expect(wide[2]).toMatch(/^nothing finished yet +● Fix login +✓ nothing stuck +○ Write a test$/)
-  const mid = (await draw(100)).join('\n')
-  for (const x of ['Done 0', 'nothing finished yet', 'Active 1', 'Stuck 0', '✓ nothing stuck', 'Left 1']) expect(mid).toContain(x)
+  expect(wide[1]).toMatch(/^Left 1 +Active 1 +Stuck 0 +Done 0$/)
+  expect(wide[2]).toMatch(/^○ Write a test +● Fix login +✓ nothing stuck +nothing finished yet$/)
+  const two = await draw(100)
+  console.log(['', 'Summary, 150 columns:', ...wide, '', 'Summary, 2 x 2, 100 columns:', ...two].join('\n'))
+  // 2 x 2, a kanban read left to right then down: Left, Active on top, Stuck, Done below.
+  expect(two.filter(l => /^(Left|Stuck) \d/.test(l))).toEqual([expect.stringMatching(/^Left 1 +Active 1$/), expect.stringMatching(/^Stuck 0 +Done 0$/)])
+  const mid = two.join('\n')
+  for (const x of ['Left 1', 'Active 1', 'Stuck 0', '✓ nothing stuck', 'Done 0', 'nothing finished yet']) expect(mid).toContain(x)
   // One column: the empty groups share one line.
-  expect(await draw(60)).toContain('Done: nothing  ·  Stuck: nothing')
+  expect(await draw(60)).toContain('Stuck: nothing  ·  Done: nothing')
   await $.command.run(whatcha('compact'))
   const m = await draw(150)
   expect(m.length).toBeLessThanOrEqual(6)
-  expect(m[1]).toMatch(/^Done 0 +Active 1 +Stuck 0 +Left 1$/)
-  expect(m[2]).toMatch(/^nothing finished yet +● Fix login +✓ nothing stuck +○ Write a test$/)
+  expect(m[1]).toMatch(/^Left 1 +Active 1 +Stuck 0 +Done 0$/)
+  expect(m[2]).toMatch(/^○ Write a test +● Fix login +✓ nothing stuck +nothing finished yet$/)
 })
 
 test('Summary board is a kanban: newest first in every column, whatever order Haiku gives; +N more cuts the oldest', async ($, on) => {
@@ -1002,16 +1006,16 @@ test('Summary board is a kanban: newest first in every column, whatever order Ha
   m.reply(JSON.stringify({ p: 10, t: Array.from({ length: 8 }, (_, i) => [`Step ${i + 1}`, 'r', `Do import step ${i + 1}.`, `#1.${i + 1}`]), b: [] }))
   const ui = await $.ui.mount(BAND(50, 150))
   await ui.press({ key: 'tab-summary' })
-  const left = screen(bodyOf(await ui.drawn()), 145).map(l => l.slice(111).trim()).filter(Boolean)
+  const left = screen(bodyOf(await ui.drawn()), 145).slice(1).map(l => l.slice(0, 34).trim())
   expect(left.slice(0, 3)).toEqual(['Left 8', '○ Step 8', '○ Step 7'])
   await ui.press({ key: 'size-compact' })
   const mRows = screen(bodyOf(await ui.drawn()), 145)
-  expect(mRows.map(l => l.slice(111).trim())).toEqual(['', 'Left 8', '○ Step 8', '○ Step 7', '+6 more', ''])
+  expect(mRows.slice(1, -1).map(l => l.slice(0, 34).trim())).toEqual(['Left 8', '○ Step 8', '○ Step 7', '+6 more'])
   // A later change moves a task to the top: step 2 is updated now.
   await m.clock.advance(60_000)
   await $.tool.call({ tool: 'TaskUpdate', taskId: '2', status: 'in_progress' } as never)
   m.reply(JSON.stringify({ p: 10, t: Array.from({ length: 8 }, (_, i) => [`Step ${i + 1}`, 'r', '', `#1.${i + 1}`]), b: [] }))
   await ui.press({ key: 'refresh' })
-  expect(screen(bodyOf(await ui.drawn()), 145).map(l => l.slice(111).trim())[2]).toBe('○ Step 2')
+  expect(screen(bodyOf(await ui.drawn()), 145).map(l => l.slice(0, 34).trim())[2]).toBe('○ Step 2')
   await ui.unmount()
 })

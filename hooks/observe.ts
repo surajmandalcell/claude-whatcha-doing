@@ -390,7 +390,7 @@ export function summaryInput(o: Observed): string {
 export const SUMMARY_SYSTEM = 'Summarize a coding session in very simple English. JSON only.'
 export const summaryPrompt = (input: string) =>
   `Threads (#id<parent = side trip; done/answered are finished):\n${input}\n\n` +
-  'Reply JSON only. p: percent done. t: max 8 tasks as [name 2-4 words, status d=done a=active b=stuck r=left, ' +
+  'Reply JSON only. p: percent done. t: max 8 tasks as [name 2-4 words, status r=left a=active b=stuck d=done, ' +
   'plain line of at most 8 words, the #id it comes from]. b: why stuck, at most 12 words.\n' +
   '{"p":0,"t":[["","d","","#1.1"]],"b":[""]}'
 

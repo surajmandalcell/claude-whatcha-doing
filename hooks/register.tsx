@@ -746,8 +746,9 @@ function threadWindow(els: Els, o: Observed, off: number, cols: number): JSX.Ele
 /** Summary board: a column needs about 30 characters; columns sit 3 apart. */
 export const BOARD_MIN = 30
 const BOARD_GAP = 3
+// A normal kanban, left to right: to do, in progress, failed, done (2 x 2: Left, Active over Stuck, Done).
 const ORDER: [Summary['tasks'][number]['status'], string, string?][] = [
-  ['completed', 'Done', 'success'], ['active', 'Active', 'suggestion'], ['blocked', 'Stuck', 'error'], ['remaining', 'Left'],
+  ['remaining', 'Left'], ['active', 'Active', 'suggestion'], ['blocked', 'Stuck', 'error'], ['completed', 'Done', 'success'],
 ]
 /** The dim line under an empty Summary column (Stuck draws its own, with a green ✓). */
 const EMPTY: Record<string, string> = { completed: 'nothing finished yet', active: 'nothing running', remaining: 'nothing left' }
