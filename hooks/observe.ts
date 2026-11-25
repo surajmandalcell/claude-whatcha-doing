@@ -67,14 +67,27 @@ const words = (s: string) => s.toLowerCase().split(/[^a-z0-9.]+/).filter(w => w 
 /** First ~6 meaningful words of the first clause, without the cue ("wait, unrelated:"). */
 export function titleOf(text: string): string {
   // Pasted images and text are noise in a title; the row cuts at the real width, so keep the whole first clause.
-  const plain = text.replace(/\[(Image|Pasted text) #\d+[^\]]*\]/g, ' ').replace(LIST, '').replace(CUE, '')
-  const w = plain.split(/[:?!\n]|\.\s/)[0]!.split(/\s+/).filter(x => x && !SKIP.has(x.toLowerCase()))
+  const plain = untag(text).replace(LIST, '').replace(CUE, '')
+  const clauses = plain.split(/[:?!\n]|\.\s/).map(c => c.split(/\s+/).filter(x => x && !SKIP.has(x.toLowerCase())))
+  // "Where are these" names nothing: take the first clause that is not a fragment, else the first one.
+  const w = clauses.find(c => !isFragment(c)) ?? clauses.find(c => c.length) ?? []
   const t = w.slice(0, 24).join(' ')
   return t ? t[0]!.toUpperCase() + t.slice(1) : short(plain, 200)
 }
+/** One word, or ending on a word that points elsewhere ("these", "it", "where"): not a name on its own. */
+// Also a clause cut mid-way: it ends on "its", "the", "to", "and".
+const DANGLING = new Set('these this those that it them they there here what which where why how something stuff its his her their our my your the a an to of and or but with for in on at by'.split(' '))
+const isFragment = (w: string[]) => w.length < 2 || DANGLING.has(w.at(-1)!.toLowerCase().replace(/[^a-z]/g, ''))
+// Words too common to tell two topics apart.
+const COMMON = new Set('are is was were do does did i we so also now then with from into make use what where why how which these those there here stuff thing things basically like should will need want get let'.split(' '))
+const topicWords = (s: string) => words(s).filter(w => w.length > 2 && !COMMON.has(w))
 // A prompt typed as a list item or quote ("- Prompt reference: ...") keeps its words, not the "- ".
 const LIST = /^\s*((?:[-*+>]|\d+[.)]|\[[ xX]?\])\s+)+/
 export const unlist = (s: string) => s.replace(LIST, '')
+/** Drops the composer's attachment tags: "[Image #1]", "[Pasted text #2 +40 lines]", "[File #3]". */
+export const untag = (s: string) => s.replace(/\[[A-Z][\w ]* #\d+[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim()
+/** A prompt as a sub row shows it: no tags, no list mark, one line. */
+export const promptLine = (s: string) => unlist(untag(s))
 const CUE = /^\s*((ok(ay)?|so)[,\s]+)?((wait|btw|by the way|side question|quick question|unrelated|new thing|also|next|back to [^:,.]*|go(ing)? back( to [^:,.]*)?)\b[,:\s-]*)*/i
 const TANGENT = /^\s*(wait|btw|by the way|side question|quick question)\b|\bunrelated\b/i
 const RETURN = /^\s*((ok(ay)?|so)[,\s]+)?(back to|go(ing)? back)\b/i
@@ -102,14 +115,31 @@ export function onPrompt(o: Observed, text: string): Observed {
     } else o = open(o, titleOf(text))
   } else if (TANGENT.test(text)) o = open(o, titleOf(text), now.id)
   else if (OK.test(text) && now.parent) o = open(o, titleOf(text), now.id)
+  else if (isNewTopic(o, now, text)) o = open(o, titleOf(text))
   else o = setThread(o, now.id, t => ({ ...t, state: 'active' }))
   o = setThread(o, o.current, t => ({ ...t, prompt: text.trim().slice(0, 300) }))
   return log(o, 'prompt', short(text, 80))
 }
 
+/**
+ * A long prompt (8+ topic words) that shares no topic word with the thread's name or its prompts is a new topic.
+ * shortcut: word overlap only, so a long follow-up in new words opens a thread; use the on-device model if it misfires.
+ */
+function isNewTopic(o: Observed, now: Thread, text: string): boolean {
+  const mine = topicWords(text)
+  // Picks pasted from an options page ("- Exact: 1 Yellow on blue tile", one per line) answer this thread.
+  if (mine.length < 8 || text.trim().split('\n').every(l => /^\s*[-*] [^:\n]{1,40}:/.test(l))) return false
+  const seen = new Set(topicWords([now.title, now.name ?? '', now.prompt ?? '', ...o.log.filter(a => a.thread === now.id && a.kind === 'prompt').map(a => a.text)].join(' ')))
+  return !mine.some(w => seen.has(w))
+}
+
 /** Marks the current thread as seen at `at`: the first time sets its start; `sent` marks a prompt the owner sent. */
-export const stamp = (o: Observed, at: number, sent = false): Observed =>
-  setThread(o, o.current, t => ({ ...t, startedAt: t.startedAt ?? at, lastAt: at, sentAt: sent ? at : t.sentAt }))
+export const stamp = (o: Observed, at: number, sent = false): Observed => {
+  // The newest log entry is what this event added: it takes the time, for the sub rows' "· 12:07".
+  const last = o.log.at(-1)
+  if (last && last.at === undefined) o = { ...o, log: [...o.log.slice(0, -1), { ...last, at }] }
+  return setThread(o, o.current, t => ({ ...t, startedAt: t.startedAt ?? at, lastAt: at, sentAt: sent ? at : t.sentAt }))
+}
 
 /** "sent 10:42": the local clock time of the thread's last prompt. */
 export const sentLabel = (at: number) => {
@@ -241,9 +271,10 @@ export function onPlan(o: Observed, md: string): Observed {
 /** The on-device model's thread name, kept to its first line and 6 words; undefined when it is not a name. */
 export const NAME_SYSTEM = 'Name the coding task in the message in 3 to 6 plain words. Reply with the name only, no quotes.'
 export function threadName(reply: string | undefined): string | undefined {
-  const w = (reply ?? '').split('\n')[0]!.replace(/^(name|title):\s*/i, '').replace(/["'“”‘’*_`.]/g, '').trim().split(/\s+/).filter(Boolean)
-  if (!w.length || w.length > 10) return undefined
-  const s = short(w.slice(0, 6).join(' '))
+  const w = untag((reply ?? '').split('\n')[0]!).replace(/^(name|title):\s*/i, '').replace(/["'“”‘’*_`.]/g, '').trim().split(/\s+/).filter(Boolean)
+  // Never cut a reply to 6 words: a cut echo of the prompt ("here reduce padding, its") is a fragment, not a name.
+  if (w.length < 3 || w.length > 6 || isFragment(w)) return undefined
+  const s = short(w.join(' '))
   return s[0]!.toUpperCase() + s.slice(1)
 }
 
@@ -354,7 +385,7 @@ export const demoObserved = (now: number): Observed => ({
     {
       id: 4, title: 'Show tax on each cart line', state: 'active',
       prompt: 'next, show the tax on each cart line in src/cart/CartTable.ts, formatted with formatMoney, and add a test',
-      startedAt: now - 18 * MIN, sentAt: now - 18 * MIN, lastAt: now - 2 * MIN,
+      startedAt: now - 18 * MIN, sentAt: now - 4 * MIN, lastAt: now - 2 * MIN,
       todos: [
         {
           text: 'Add a tax column to CartTable', status: 'in_progress', activeForm: 'Adding a tax column to CartTable',
@@ -385,6 +416,7 @@ export const demoObserved = (now: number): Observed => ({
     { kind: 'prompt', text: 'next, show the tax on each cart line', thread: 4 },
     { kind: 'todo', text: '0/3 todos done', thread: 4 },
     { kind: 'edit', text: 'cart/CartTable.ts', thread: 4 },
+    { kind: 'prompt', text: '[Image #1] - keep the tax column narrow, right-aligned like Price', thread: 4, at: now - 4 * MIN },
   ],
   lastTest: { ok: false, text: 'npm test: 11 pass, 1 fail' },
 })

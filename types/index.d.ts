@@ -28,6 +28,8 @@ export type Activity = {
   kind: 'prompt' | 'return' | 'edit' | 'test' | 'error' | 'agent' | 'todo' | 'commit'
   text: string
   thread: number
+  /** When it happened (ms); absent on entries rebuilt from the transcript. */
+  at?: number
 }
 export type Observed = {
   threads: Thread[]

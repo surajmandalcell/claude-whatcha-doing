@@ -1,10 +1,10 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Register, ToolCallInput, ToolCallResult } from 'claude-code'
+import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Register, SessionMessage, ToolCallInput, ToolCallResult } from 'claude-code'
 
 import type { ArtifactRow, Artifacts, Band, Observed, Summary, SummaryCache, Tab, Thread, Todo } from '../types'
 import {
   demoArtifacts, demoObserved, demoSummary, emptyObserved, hash, isTestCommand, onAgent, onArtifact, onCommit, onEdit,
-  dropEngineText, isEngineText, noticeOf, onNotice, onError, onPlan, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, sentLabel, short, stamp, unlist, testResult, SUMMARY_SYSTEM, summaryInput,
+  dropEngineText, isEngineText, noticeOf, promptLine, untag, onNotice, onError, onPlan, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, sentLabel, short, stamp, unlist, testResult, SUMMARY_SYSTEM, summaryInput,
   summaryPrompt, SUMMARY_OUT, NAME_SYSTEM, threadName,
 } from './observe'
 import { onDevice } from './ondevice'
@@ -87,6 +87,16 @@ export const register: Register = on => {
     })
     if ((await $.env.get('WHATCHA_DEMO')) === '1') await update($, demo, () => true)
     await update($, observed, dropEngineText).catch(() => {})
+    // Loaded mid-session (a reload, a resume): the transcript holds prompts we never saw, so rebuild from it.
+    const msgs = await $.session.messages().catch(() => undefined)
+    if (Array.isArray(msgs)) {
+      await update($, observed, o => {
+        if (promptsIn(msgs) <= o.log.filter(a => a.kind === 'prompt').length) return o
+        const r = replay(msgs)
+        // Keep the on-device names and send times of threads we already knew.
+        return { ...r, threads: r.threads.map(t => ({ ...o.threads.find(x => x.title === t.title), ...t })) }
+      }).catch(() => {})
+    }
     // Artifacts outlive the session: one store key per project folder.
     const key = `artifacts:${e.cwd}`
     const rows = ((await $.store.get(key).catch(() => undefined)) as ArtifactRow[] | undefined) ?? []
@@ -131,7 +141,7 @@ export const register: Register = on => {
           fs: { read: (p: string) => $.fs.read(p), exists: (p: string) => $.fs.exists(p) },
           process: { run: (argv: string[], opts?: { stdin?: string; timeoutMs?: number }) => $.process.run(argv, opts) },
         } as unknown as Parameters<typeof onDevice>[0]
-        void onDevice(host, NAME_SYSTEM, e.text.slice(0, 2000))
+        void onDevice(host, NAME_SYSTEM, untag(e.text).slice(0, 2000))
           .then(r => threadName(r))
           .then(name => name === undefined ? undefined : update($, observed, x => ({ ...x, threads: x.threads.map(y => (y.id === t.id ? { ...y, name } : y)) })))
           .catch(() => {})
@@ -332,6 +342,32 @@ function observe(o: Observed, e: ToolCallInput, ran: ToolCallResult): Observed {
   return o
 }
 
+/** Prompts the band rebuilds from the transcript at most: the newest ones. */
+export const REPLAY_PROMPTS = 200
+/** A person's prompt or a task report in the transcript; tool results and engine text are not. */
+const isPrompt = (m: SessionMessage) =>
+  m.role === 'user' && !m.toolResults?.length && m.text.trim() !== '' && (!isEngineText(m.text) || !!noticeOf(m.text))
+const promptsIn = (msgs: SessionMessage[]) => msgs.filter(m => isPrompt(m) && !noticeOf(m.text)).length
+
+/**
+ * The threads rebuilt from the session's transcript, for what happened before the mod loaded: each prompt,
+ * then its tool calls, through the same steps as live. The transcript has no times, so no `sent` cell.
+ */
+export function replay(msgs: SessionMessage[]): Observed {
+  const starts = msgs.flatMap((m, i) => (isPrompt(m) && !noticeOf(m.text) ? [i] : []))
+  let o = emptyObserved
+  for (const m of msgs.slice(starts.at(-REPLAY_PROMPTS) ?? 0)) {
+    if (m.role === 'assistant') {
+      for (const u of m.toolUses) o = observe(o, { ...u.input, tool: u.tool } as unknown as ToolCallInput, u as unknown as ToolCallResult)
+    } else if (isPrompt(m)) {
+      const notice = noticeOf(m.text)
+      // A new prompt means the turn before it ended with an answer.
+      o = notice ? onNotice(o, notice) : onPrompt(onTurnEnd(o, true), m.text)
+    }
+  }
+  return o
+}
+
 /** An Artifact publish (not a list, read or asset upload): its URL and title from the result. */
 function published(e: ToolCallInput, ran: ToolCallResult): { url: string; title: string } | undefined {
   const c = e as Record<string, unknown> & { tool: string }
@@ -412,8 +448,8 @@ function fit({ Text, Button }: Els, lines: JSX.Element[], n: number, act: Acts, 
 
 // ---- Threads tab: one timeline, each thread with its tasks and plan steps ----
 
-/** A thread's shown name: the on-device model's, else the title from the first prompt. */
-const nameOf = (t: Thread) => t.name ?? unlist(t.title)
+/** A thread's shown name: the on-device model's (checked again, so a fragment saved before 1.0.18 drops), else the title. */
+const nameOf = (t: Thread) => (t.name ? threadName(t.name) : undefined) ?? unlist(untag(t.title))
 /** One glyph per thread state, the same in S, M and L: ▸ now, ✓ done, ✗ stuck, ⏸ paused. */
 const headGlyph = (o: Observed, t: Thread): [string, string?] =>
   t.id === o.current ? ['▸', 'suggestion'] : isOver(t) ? ['✓', 'success']
@@ -424,27 +460,35 @@ const rank = (o: Observed, t: Thread) => (t.id === o.current ? 0 : isOver(t) ? 2
 export const ordered = (o: Observed) => [...o.threads].reverse().sort((a, b) => rank(o, a) - rank(o, b))
 const running = (t: Thread) => t.todos.find(d => d.status === 'in_progress')
 
-/** "11 tests pass · 1 fail", "3 files", "1 commit", "sent 10:42": the 4 right-hand columns of a thread's row, plain counts from its own log. */
+/** "sent 10:42", "1 commit", "3 files", "11 pass · 1 fail": the 4 right-hand columns of a thread's row, plain counts from its own log. */
 type Part = [string, string?]
 export function metaOf(o: Observed, t: Thread): Part[][] {
   const mine = o.log.filter(a => a.thread === t.id)
   const test = mine.findLast(a => a.kind === 'test')
   const m = test?.text.match(/(\d+) pass, (\d+) fail/)
-  const bad = !!test?.text.startsWith('tests fail')
   const tests: Part[] = !test ? []
-    : m ? [[`${m[1]} tests pass`, 'success'], ...(+m[2]! ? [[' · '], [`${m[2]} fail`, 'error']] as Part[] : [])]
-    : [[bad ? 'tests fail' : 'tests pass', bad ? 'error' : 'success']]
+    : m ? [[`${m[1]} pass`, 'success'], ...(+m[2]! ? [[' · '], [`${m[2]} fail`, 'error']] as Part[] : [])]
+    : [] // no count read from the run: an empty cell, never a bare "tests pass"
   const commits = mine.filter(a => a.kind === 'commit').length
-  return [tests, t.files.length ? [[plural(t.files.length, 'file')]] : [], commits ? [[plural(commits, 'commit')]] : [], t.sentAt === undefined ? [] : [[sentLabel(t.sentAt)]]]
+  return [t.sentAt === undefined ? [] : [[sentLabel(t.sentAt)]], commits ? [[plural(commits, 'commit')]] : [], t.files.length ? [[plural(t.files.length, 'file')]] : [], tests]
 }
 const lenOf = (c: Part[]) => c.reduce((a, [s]) => a + [...s].length, 0)
+/** The column separator: much fainter than dim, barely there on the dark background. */
+const FAINT = '#3a3a3a'
+
+/** A thread's work rows, by log kind: the mark and its color (none: dim). */
+const WORK: Partial<Record<Observed['log'][number]['kind'], [string, string?]>> = {
+  edit: ['✎'], test: ['✓', 'success'], commit: ['◆'], agent: ['↳'],
+}
 
 /** Indents: a thread at 0, its tasks and Claude's line at 2, plan steps at 4, nested steps 2 deeper each. */
 const IN = (n: number) => ' '.repeat(n)
 
 /**
- * One thread as rows, each its own line: the head (glyph, name, then the meta columns at `widths`),
- * `❯ <activeForm>…` of the running task, every task, then the plan, folded to "Plan · N steps" unless current.
+ * One thread as rows, each its own line: the head (glyph, name, then the meta columns at `widths`), the later
+ * prompts (`› <prompt> · 12:07`, the last 3, newest lowest), `❯ <activeForm>…` of the running task, every task
+ * (or with no tasks, the last 3 things done: edits, test runs, commits, helpers), then the plan, folded to
+ * "Plan · N steps" unless current. So a new prompt and new work always show near the head.
  */
 function threadBlock(els: Els, o: Observed, t: Thread, widths: number[]): JSX.Element[] {
   const { Box, Text } = els
@@ -459,7 +503,7 @@ function threadBlock(els: Els, o: Observed, t: Thread, widths: number[]): JSX.El
         <Text wrap="truncate-end"><Text color={tone}>{g}</Text> <Text bold color={isNow ? 'suggestion' : undefined}>{nameOf(t)}</Text></Text>
       </Box>
       {widths.map((w, i) => w > 0 && (
-        <Text><Text dimColor>{' ┊ '}</Text>{' '.repeat(w - lenOf(meta[i]!))}{meta[i]!.map(([s, c]) => <Text color={c} dimColor={!c}>{s}</Text>)}</Text>
+        <Text><Text color={FAINT}>{' ┊ '}</Text>{' '.repeat(w - lenOf(meta[i]!))}{meta[i]!.map(([s, c]) => <Text color={c} dimColor={!c}>{s}</Text>)}</Text>
       ))}
     </Box>
   )
@@ -479,10 +523,24 @@ function threadBlock(els: Els, o: Observed, t: Thread, widths: number[]): JSX.El
       return <Text wrap="truncate-end">{IN(4 + 2 * (s.depth + (underHeading ? 1 : 0)))}<Text dimColor>{s.mark}</Text> {s.text}</Text>
     }) : []),
   ] : []
+  const mine = o.log.filter(a => a.thread === t.id)
+  const when = (at?: number) => (at === undefined ? '' : ` · ${sentLabel(at).slice(5)}`)
+  // The first prompt names the thread; each later one gets its own row.
+  const prompts = mine.filter(a => a.kind === 'prompt').slice(1).slice(-3).map(a => (
+    <Text wrap="truncate-end">{IN(2)}<Text dimColor>› </Text>{promptLine(a.text)}<Text dimColor>{when(a.at)}</Text></Text>
+  ))
+  const work = tasks.length ? [] : mine.filter(a => WORK[a.kind]).slice(-3).map(a => {
+    const bad = a.kind === 'test' && a.text.startsWith('tests fail')
+    const [mark, color] = bad ? ['✗', 'error'] : WORK[a.kind]!
+    const text = a.kind === 'test' ? a.text.replace(/^tests (pass|fail): /, '') : a.text.replace(/^(commit|helper): /, '')
+    return <Text wrap="truncate-end">{IN(2)}<Text color={color} dimColor={!color}>{mark}</Text> <Text dimColor>{text}{when(a.at)}</Text></Text>
+  })
   return [
     lead,
+    ...prompts,
     ...(run ? [<Text wrap="truncate-end">{IN(2)}<Text dimColor>❯ </Text><Text color="suggestion">{run.activeForm ?? run.text}…</Text></Text>] : []),
     ...tasks,
+    ...work,
     ...plan,
   ]
 }
