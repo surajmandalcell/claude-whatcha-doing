@@ -9,36 +9,51 @@ errors, never generic labels.
 All looks are settled. Nothing is open.
 
 - **Place**: a band above the prompt, no sidebar or side pane.
-- **Sizes**: header buttons `S` (the one status row), `M` (3 body lines: Threads the newest
-  graph rows, Summary the head or updating bar, Active and Stuck, and Work left, Artifacts the newest one),
-  `L` (the full body). The shown size is bold in the accent color. A tab keeps Compact; from the one
-  row it opens Regular. `/whatcha compact` opens Compact.
-- **Height**: Regular's body takes at least 6 rows, and on 40 or more rows up to 55%. On a shorter terminal
-  it may take up to 90% less the prompt, but Claude Code caps the band at half the terminal (`maxRows`).
-- **Show all**: a cut list ends in "earlier · N more" (timeline) or "+N more" (lists). A click, or
-  `/whatcha all`, grows the band to every row Claude Code gives it; the engine scrolls the rest. The
-  earlier row (now "earlier · show less"), `Show less`, a size button, a tab, or the ring leaving the band
-  goes back.
-- **Collapsed row**: `● now: <thread>  ·  X/N threads done  ·  ~45% ▰▰▱▱▱`, with the tabs, the three sizes
-  and `▾` on the right. Under 120 columns the buttons take a second row.
+- **Sizes**: header buttons ` S ` (the one status row), ` M ` (4 body lines), ` L ` (the full body). Each
+  label has a space on both sides, so the click target is 3 columns wide. The shown size is bold in the
+  accent color. A tab keeps M; from the one row it opens L. `/whatcha compact` opens M.
+- **M**: Threads pins the current thread's head row on top at the full band width (no right column), then
+  its next 3 sub rows with the same indents as L: Claude's `❯` line, the results line, then the tasks from
+  the first unfinished one on, then the plan. As tasks finish, the rows move on under the pinned head.
+  Summary shows the head or updating bar, Active and Stuck, and Work left. Artifacts shows the header and the
+  newest one.
+- **Height**: L's body is 20% of the terminal rows, at most 80 and at least 3 (24 rows: 4, 50: 10, 120: 24).
+  Claude Code also caps the band at half the terminal (`maxRows`).
+- **Show all**: a cut list ends in "+N more". A click, or `/whatcha all`, grows the band to every row
+  Claude Code gives it; the engine scrolls the rest. `Show less`, a size button, a tab, or the ring leaving
+  the band goes back.
+- **Status row** (S, and the header of M and L): `● Now (X/N): <thread>  ·  ~45% ▰▰▱▱▱`, X of N threads
+  done. The thread name uses all the room up to the tabs, the three sizes and `▾` on the right, and is cut
+  only at that edge. Under 120 columns the buttons take a second row.
 - **Hidden**: `▾` shrinks the band to one right-aligned button, `▴ @whatcha-doing`.
 - **Tabs**: Threads · Summary · Artifacts, clicked. The band never shows key labels or "press x" text:
   keys go to the prompt box, and the band almost never has focus.
-- **Threads tab, left**: a git graph, newest at the bottom next to the prompt. Reads like
-  `git log --graph`: every row draws every live lane, ticks included. A side trip forks on its own node
-  (`├─● Why is CI red?`) and merges on the next row of the thread it returns to (`├─┴─╯ ✗ tests fail`);
-  bends use rounded corners, `├` where a lane goes on. A cut end is dotted (`┆ earlier · 3 more`).
-- **Threads tab, divider**: a faint `│` runs the full body height between the graph and the table, in
-  every Threads view, show all included.
-- **Threads tab, right**: a table under a dim header row (`4 threads`, then the column names):
-  1. status glyph, title (not indented; the graph shows side trips), then fixed right-aligned columns
-     Tasks (bar + x/y, 12 wide), Started and Last (9 wide each);
-  2. dim `❯ "<the owner's last prompt to it, ~80 chars, cut at a word>"`;
-  3. dim `⏺ <file names> · tests 41/42 · helper: <what> · commit: <message>`;
-  4. the last failure on its own red line, `✗ 1 snapshot failed in Settings.test.tsx`.
-  Lines 2-4 sit at the title's left edge, may run under Tasks, and are cut before the time columns. The
-  current thread opens with its tasks one step in. No blank line between threads: the height cap has no
-  room for it.
+- **Threads tab, left** (60% of the width): every thread with its tasks and plan steps. The current
+  thread first, then open ones, then finished ones, newest first in each group; one blank row between
+  threads. Every task and every plan step has its own row. Indents show the hierarchy:
+  1. col 0: the head, `▸` now (accent), `✓` done, `✗` a stuck task, `■` paused; the name in bold;
+     `  ·  now|paused|done|answered`; at the right edge `2 of 6 done` or `plan · 4 steps`, then a dim
+     `  ·  sent 10:42`, the local clock time of the owner's last prompt to the thread (`sentAt`, stamped
+     at `prompt.submit`);
+  2. col 2: `❯ <activeForm>…` of the running task (accent), word for word from TaskCreate or TodoWrite;
+  3. col 4: one results line from plain counts, `11 tests pass  ·  1 fails  ·  3 files  ·  1 commit`;
+  4. col 2: each task, `✓` done (dim), `●` running, `○` to do, `✗` stuck; its subject only;
+  5. col 2: `Plan · N steps`, then the plan at col 4: section headings bold and dim, items under them at
+     col 6 with their own number (`1.`) or `·`, each nested level 2 deeper.
+  No prompt quote and no model line: a thread points back to its prompt by its name and the time sent.
+- **Thread names**: the first prompt of a new thread goes to Apple's on-device model (FoundationModels,
+  via `helper/ondevice.swift`) in the background after `prompt.submit`, never blocking it. Its 3-6 word
+  reply is stored on the thread as `name`. Without the model the name is the title from the prompt's first
+  clause. The model is used for nothing else.
+- **Plans**: the ExitPlanMode call's plan markdown, or the plan file Claude writes under
+  `~/.claude/plans/`, is parsed into steps and stored on the current thread. Numbered (`1.`, `1)`) and
+  bulleted items keep their nesting; a wrapped item's next lines join it; headings stay as section
+  labels; prose, code blocks and headings with no items under them drop.
+- **Threads tab, divider**: a faint `│` runs the full body height between the two columns.
+- **Threads tab, right**: the current task in detail: `Now: <subject>` and `task 3 of 6`, Claude's
+  activeForm in bold accent, the TaskCreate description word-wrapped, then `next  <next task or plan step>`.
+  With no running task: `No task running.` and the next one.
+- **Under 100 columns**: one column, the threads first, then the current task.
 - **Summary tab**: Haiku's estimate, marked as an estimate (`~38% done ▰▰▰▰▱▱▱▱▱▱ estimate: Haiku's
   guess…`), then a board of Done, Active, Stuck, Left, each task with one plain line, blockers in red,
   and one full-width "Work left" row. Each board column is at least 34 columns wide: columns per row =

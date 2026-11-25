@@ -1,4 +1,4 @@
-![Watcha Doing Claude: the Threads tab, a timeline on the left and a table of threads on the right](docs/threads.png)
+![Watcha Doing Claude: the Threads tab, each thread with its tasks and plan on the left, the running task on the right](docs/threads.png)
 
 <div align="center">
 
@@ -20,15 +20,17 @@ is which. whatcha-doing shows, at a glance, what you asked each session, what it
 | | |
 |---|---|
 | ![Collapsed status row](docs/collapsed.png) | ![Summary board](docs/summary.png) |
-| **Status row.** By default the band is one row: the thread you are on now, how many threads are done and, once you open Summary, a percent-done estimate. | **Summary.** One Haiku call sorts the tasks into Done, Active, Stuck and Left, each with a one-line note. |
+| **Status row.** By default the band is one row: `Now (2/4): <thread>`, how many of the threads are done, and, once you open Summary, a percent-done estimate. | **Summary.** One Haiku call sorts the tasks into Done, Active, Stuck and Left, each with a one-line note. |
 | ![Artifacts list](docs/artifacts.png) | ![Minimized band](docs/minimized.png) |
 | **Artifacts.** The pages this project published, newest change first. A click on the name copies the link; the link opens on click. | **Minimized.** `▾` shrinks the band to `▴ @whatcha-doing` on the right. |
 | ![Show all](docs/show-all.png) | |
 | **Show all.** A long list ends in "+N more". A click grows the band to show everything; `Show less` goes back. | |
 
-**Threads** (the shot at the top) puts a timeline beside a table of every thread. Each prompt opens a thread.
-A new prompt after work started is a side trip, shown under the thread it came from. Each thread shows your last
-prompt (`❯`), what it did (`⏺`: files, tests, commits) and its last failure (`✗`).
+**Threads** lists every thread with its tasks and plan steps, one row each, indented thread > task > step.
+Each thread row ends with the time you sent its last prompt (`sent 10:42`), so you can find that prompt.
+Under each thread: what Claude is doing now (`❯`) and one results line (`11 tests pass  ·  1 fails  ·  3 files`).
+The right side shows the running task in detail. Plans from plan mode are parsed into steps. On a Mac with
+Apple Intelligence, the on-device model names each new thread in 3-6 words; it runs on your Mac, nothing is sent.
 
 ## Install
 
@@ -67,14 +69,13 @@ The band is driven with the mouse: click the tabs and buttons. Keys still go to 
 | `/whatcha open` or `/whatcha threads` | Open the Threads tab |
 | `/whatcha summary` | Open the Summary tab |
 | `/whatcha artifacts` | Open the Artifacts tab |
-| `/whatcha compact` | M: the 3 most useful lines of the tab |
+| `/whatcha compact` | M: the current thread pinned, plus its next 3 rows |
 | `/whatcha all` | Show everything, no height limit |
 | `/whatcha close` | S: back to the one status row |
 | `/whatcha min` | Hide to `▴ @whatcha-doing` |
 | `/whatcha demo`, `/whatcha live` | Show sample data, or go back to this session |
 
-The header buttons S, M and L pick the size: S is one row, M is 3 lines, L is up to 55% of the rows on a
-terminal of 40 rows or more, within the half Claude Code gives the band. Set `WHATCHA_DEMO=1` to start in demo mode.
+The header buttons S, M and L pick the size: S is one row, M is 4 lines, L is 20% of the terminal rows (3 to 80), within the half Claude Code gives the band. Set `WHATCHA_DEMO=1` to start in demo mode.
 
 ## Haiku budget
 
