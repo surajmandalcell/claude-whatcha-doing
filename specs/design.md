@@ -15,7 +15,7 @@ All looks are settled. Nothing is open.
 - **M**: Threads shows 6 rows of the timeline (the same rows and indents as L), the newest at the bottom.
   The top row is always the head of the thread the top visible row belongs to, like a navbar. Status row + hairline + 6 rows must fit the
   engine's `maxRows`, or the engine scrolls the band and a row is lost: M draws `min(6, maxRows - header
-  - 1)` rows (header: 1 row, 2 under 120 columns). Summary shows the head or updating bar, Active and Stuck, and Work left. Artifacts shows the header and the
+  - 1)` rows (header: 1 row, 2 under 120 columns). Summary shows the same board as L, one row per task (name only), as many as fit. Artifacts shows the header and the
   newest one.
 - **Height**: L's body is 20% of the terminal rows, at most 22 and at least 3 (24 rows: 4, 50: 10, 120: 22).
   Claude Code also caps the band at half the terminal (`maxRows`).
@@ -111,8 +111,10 @@ All looks are settled. Nothing is open.
   labels; prose, code blocks and headings with no items under them drop.
 - **Summary tab**: Haiku's estimate, marked as an estimate (`~38% done ▰▰▰▰▱▱▱▱▱▱ estimate: Haiku's
   guess…`), then a board of Done, Active, Stuck, Left, each task with one plain line, blockers in red,
-  and one full-width "Work left" row. Each group is one row at the full band width, like Threads, and
-  each task with its plain line is one line, cut only at the right edge.
+  and one full-width "Work left" row. Columns by band width, each at least 30 wide with 3-column gaps:
+  4 across from 129, 2 x 2 from 63, else 1 (150 cols: 4, 100: 2 x 2, 60: 1). In a column a task name and
+  its plain line each wrap to 2 lines, then cut with "…"; with one column they share one row. A cut
+  column ends in "+N more" (whole tasks).
   While Haiku runs, a thin bar (`━━━╸────  updating with Haiku  3 s`) sits under the head and fills over
   ~8 s without reaching the end; the last board stays below it. With no estimate yet the bar shows alone.
   Haiku runs only while this tab is shown, or on ↻ (refresh), cached until the state changes. The demo shows
@@ -124,7 +126,8 @@ All looks are settled. Nothing is open.
 - **Errors**: a failed step marks its thread ✗ only while it is the last relevant result. A later step that
   works, a commit, a passing test or the turn ending with a reply clears the thread's earlier errors. Exit 1
   of a command ending in `grep`, `rg`, `test`, `[`, `diff` or `cmp` with no error text is "no match", not an
-  error.
+  error. A test command that fails with no pass or fail count (a missing script, a bad path) is a failed
+  step, not a test result: it never blocks a task. Haiku sees only the current thread's last test.
 - **Artifacts tab**: every Artifact the project published (from the Artifact tool's publish calls),
   newest change first. Two lines each, tied by a dim dot and hook: `● <name>`, then
   `╰╴🔗 <link>` (dim). 🔗 is 2 columns wide; the link is cut 3 columns sooner for it. Two fixed
