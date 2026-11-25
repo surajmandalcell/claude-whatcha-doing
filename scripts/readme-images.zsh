@@ -13,6 +13,11 @@ trap 'rm -rf -- "$tmp"' EXIT
 
 # Cut the window out of a capture: the box of the dark pixels, with round corners.
 window() {
+  # A capture with alpha (screencapture -o) already has the window's own round corners: keep them,
+  # since flattening on white leaves a white fringe outside the real corner.
+  if [[ $(magick "$1" -format '%[opaque]' info:) == False ]]; then
+    magick "$1" -trim +repage "$2"; return
+  fi
   # The white border keeps -trim from eating dark rows that touch the edge, like a title bar.
   magick "$1" -background white -flatten -bordercolor white -border 1 "$tmp/base.png"
   local box=$(magick "$tmp/base.png" -colorspace gray -threshold 50% -format %@ info:)
