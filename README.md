@@ -74,7 +74,7 @@ The band is driven with the mouse: click the tabs and buttons. Keys still go to 
 | `/whatcha demo`, `/whatcha live` | Show sample data, or go back to this session |
 
 The header buttons S, M and L pick the size: S is one row, M is 3 lines, L is up to 55% of the rows on a
-terminal of 40 rows or more, within the half Claude Code gives the band). Set `WHATCHA_DEMO=1` to start in demo mode.
+terminal of 40 rows or more, within the half Claude Code gives the band. Set `WHATCHA_DEMO=1` to start in demo mode.
 
 ## Haiku budget
 
