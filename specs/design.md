@@ -48,8 +48,9 @@ All looks are settled. Nothing is open.
   1. col 0: the head, `▸` now (accent), `✓` done, `✗` a stuck task, `⏸` paused (the same glyphs in S, M
      and L); the name in bold, taking all the width up to the first ┊. Then the 2 **columns**, on every
      row of the timeline, right-aligned:
-     - tests: `18✓ 1✗`, the pass count and ✓ green, the fail count and ✗ red, no words; 3 digits kept for
-       each (1000 and up reads `1.2k`), and the column grows to its longest cell, the same on every row.
+     - tests: `18 ✓ Pass` in green when every test passed, `3 ✗ Fail` in red when every test failed, and
+       the compact `18✓ 1✗` (pass green, fail red) when both; 1000 and up reads `1.2k`. The column grows to
+       its widest cell (at least 9), the same on every row.
        Empty with no run, or a run with no count read. A thread row shows its last run; a test sub row its own.
      - time: `10:42`, dim. A thread row shows when the owner last sent it a prompt (`sentAt`); each sub row
        when it happened (an edit, a commit, a test run, a helper finishing, a later prompt), so the
@@ -61,10 +62,12 @@ All looks are settled. Nothing is open.
   2. col 2: `Plan · N steps`; only the current thread's plan unfolds at col 4: section headings bold and
      dim, items under them at col 6 with their own number (`1.`) or `·`, each nested level 2 deeper;
   3. col 2: each task, `✓` done (dim), `●` running, `○` to do, `✗` stuck; its subject only. A thread with
-     no tasks shows its last 3 things done instead, newest lowest: `✎ spec/icons.md` edits, `✓`/`✗` test
+     no tasks shows its last 3 things done instead: `✎ spec/icons.md` edits, `✓`/`✗` test
      runs, `◆` commits, `↳` helpers; their time and counts in the columns;
-  4. col 2: each later prompt to the thread, `› <prompt>` (the last 3, newest lowest), shown at
-     `prompt.submit`; up to 2 rows each, wrapped inside the left area, cut with "…" at the end of the second;
+  4. col 2: each later prompt to the thread, `› <prompt>` (the last 3), shown at `prompt.submit`. Only the
+     newest prompt of the whole timeline takes 2 rows, wrapped inside the left area, cut with "…" at the
+     end of the second. Every older prompt is one row: its on-device summary, else the prompt cut at the ┊.
+     Done rows and prompt rows sort by time together, oldest first; a row with no time keeps its place;
   5. col 2: `❯ <activeForm>…` of the running task (accent), word for word from TaskCreate or TodoWrite,
      the lowest row, like the chat's spinner.
   The first prompt has no row: the thread's name and time point back to it.
@@ -77,6 +80,13 @@ All looks are settled. Nothing is open.
   reply is stored as `name`. A reply under 3 or over 6 words, or ending on a pointing or function word
   (`these`, `it`, `its`, `the`, `to`), is dropped; the title from the prompt's first whole clause then
   stands in ("where are these? the rule files" reads `Rule files`).
+- **Prompt summaries**: a prompt of 90 characters or more (after cleaning) goes to the on-device model
+  with "summarize as one line of 8 to 14 plain words", one call at a time in the background, never on
+  redraw: after `prompt.submit`, and at load for the newest 20 long prompts without one. The reply is
+  stored as `sum` on the prompt's log entry (and on its thread when it opened it), so each prompt asks
+  once. A reply under 6 or over 16 words (never cut), ending on a dangling word, or that only repeats the
+  prompt's opening words is dropped. The thread row shows the summary of its first prompt in place of
+  the prompt; an older `›` row shows its own. Without a summary the cleaned prompt shows, cut at the ┊.
 - **New topic**: a prompt with 8 or more topic words that shares none with the current thread's name and
   prompts opens a new thread, even without a cue like "new thing". Picks pasted from an options page
   (every line `- Name: pick`) always answer the current thread.
