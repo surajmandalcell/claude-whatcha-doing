@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="docs/threads.png" alt="Watcha Doing Claude: the band above the Claude Code prompt, with the Threads tab open" width="880">
-</p>
+<h1 align="center">Watcha Doing Claude 🥀</h1>
 
 <p align="center">
   <b>See what each Claude Code tab is doing. Right above the prompt.</b><br>
@@ -19,6 +17,10 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license"></a>
 </p>
 
+<p align="center">
+  <img src="docs/cover.png" alt="A Claude Code session in iTerm with the band above the prompt and the Threads tab open" width="880">
+</p>
+
 ## Why whatcha-doing
 
 You keep many Claude Code tabs open, and they often do similar jobs. After a while you cannot tell which tab is which.
@@ -30,41 +32,56 @@ You keep many Claude Code tabs open, and they often do similar jobs. After a whi
 
 ## Features
 
-| | |
-| --- | --- |
-| **Threads** | A timeline of your prompts, grouped into threads. Under each one: Claude's tasks, plan steps and recent work. Newest at the bottom. Columns show the time you sent it, commits, files and tests (`11 pass · 1 fail`). |
-| **Summary** | Haiku's estimate of how far along the work is, as Done, Active, Stuck and Left. |
-| **Artifacts** | Every page this project published, newest first. Click a name to copy its link. |
-| **Thread names** | On a Mac with Apple Intelligence, the on-device model names each thread in 3 to 6 words. |
+**Threads** is the main tab, shown above. Your prompts form a timeline of threads. Under each one are Claude's tasks, plan steps and recent work, newest at the bottom. Columns show when you sent it, commits, files and tests (`11 pass · 1 fail`).
 
-| Status row | Summary | Artifacts |
-| :---: | :---: | :---: |
-| <img src="docs/collapsed.png" alt="The band as one status row" width="280"> | <img src="docs/summary.png" alt="The Summary tab" width="280"> | <img src="docs/artifacts.png" alt="The Artifacts tab" width="280"> |
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/collapsed.png" alt="The band as one status row above the prompt">
+      <br><b>One status row</b><br>
+      The default size. It shows what this tab is doing now and how many threads are done.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/summary.png" alt="The Summary tab with Done, Active, Stuck and Left columns">
+      <br><b>Summary</b><br>
+      Haiku estimates how far along the work is, as Done, Active, Stuck and Left.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/artifacts.png" alt="The Artifacts tab with five published pages">
+      <br><b>Artifacts</b><br>
+      Every page this project published, newest first. Click a name to copy its link.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/minimized.png" alt="The band hidden to one small label">
+      <br><b>Hidden</b><br>
+      Click <code>▾</code> and the band shrinks to one small label. Click it to bring the band back.
+    </td>
+  </tr>
+</table>
+
+There is more: on a Mac with Apple Intelligence, the on-device model names each thread in 3 to 6 words. `/whatcha all` shows every row with no height limit.
 
 ## Install
 
-At the prompt of a Claude Code session:
-
-```
-/plugin install whatcha-doing --marketplace surajmandalcell/claude-whatcha-doing
-```
-
-Answer `y` to add the marketplace, then pick a scope. User scope loads it in every session. The band shows at once.
-
-<details>
-<summary>From a shell, and auto-update</summary>
-
-<br>
+Run this in a terminal:
 
 ```sh
-claude plugin install whatcha-doing --marketplace surajmandalcell/claude-whatcha-doing
+claude plugin marketplace add surajmandalcell/claude-whatcha-doing && claude plugin install whatcha-doing@claude-whatcha-doing
 ```
+
+New sessions show the band at once. In a session that is already open, run `/reload-plugins`.
+
+<details>
+<summary>Updates</summary>
+
+<br>
 
 To get new versions on start, run `/plugin`, open Marketplaces, pick `claude-whatcha-doing`, and turn on auto-update. To update by hand:
 
 ```sh
-claude plugin marketplace update claude-whatcha-doing
-claude plugin update whatcha-doing@claude-whatcha-doing
+claude plugin marketplace update claude-whatcha-doing && claude plugin update whatcha-doing@claude-whatcha-doing
 ```
 
 </details>
@@ -81,6 +98,8 @@ Click the tabs and buttons in the band. Your keys still go to the prompt.
 | **▾** | Hides the band to `▴ @whatcha-doing` |
 
 In M and L, `▲ ▼` scroll the Threads timeline a page, and `⤒ ⤓` jump to the oldest or newest row. The mouse wheel works too.
+
+**Remember view:** the size, 🤖/👤 and tab are saved; global by default, per project in `/plugin` → whatcha-doing settings.
 
 <details>
 <summary>Slash commands</summary>
@@ -116,6 +135,7 @@ Set `WHATCHA_DEMO=1` to start in demo mode.
 claude --plugin-dir /path/to/claude-whatcha-doing   # load a clone for one session
 claude plugin validate . && claude plugin test .
 zsh scripts/release.zsh                              # checks, bumps the version, commits and pushes
+zsh scripts/readme-images.zsh                        # remakes docs/*.png from the captures in docs/src/
 ```
 
 Installed copies update only when the version in `.claude-plugin/plugin.json` changes. Design notes are in [specs/design.md](specs/design.md).
