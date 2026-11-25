@@ -69,13 +69,13 @@ The band is driven with the mouse: click the tabs and buttons. Keys still go to 
 | `/whatcha open` or `/whatcha threads` | Open the Threads tab |
 | `/whatcha summary` | Open the Summary tab |
 | `/whatcha artifacts` | Open the Artifacts tab |
-| `/whatcha compact` | M: the current thread pinned, plus its next 3 rows |
+| `/whatcha compact` | M: the current thread pinned, plus its next 4 rows, ▲ ▼ scroll them |
 | `/whatcha all` | Show everything, no height limit |
 | `/whatcha close` | S: back to the one status row |
 | `/whatcha min` | Hide to `▴ @whatcha-doing` |
 | `/whatcha demo`, `/whatcha live` | Show sample data, or go back to this session |
 
-The header buttons S, M and L pick the size: S is one row, M is 4 lines, L is 20% of the terminal rows (3 to 80), within the half Claude Code gives the band. Set `WHATCHA_DEMO=1` to start in demo mode.
+The header buttons S, M and L pick the size: S is one row, M is 5 lines, L is 20% of the terminal rows (3 to 22), within the half Claude Code gives the band. Set `WHATCHA_DEMO=1` to start in demo mode.
 
 ## Haiku budget
 

@@ -9,21 +9,28 @@ errors, never generic labels.
 All looks are settled. Nothing is open.
 
 - **Place**: a band above the prompt, no sidebar or side pane.
-- **Sizes**: header buttons ` S ` (the one status row), ` M ` (4 body lines), ` L ` (the full body). Each
+- **Sizes**: header buttons ` S ` (the one status row), ` M ` (5 body lines), ` L ` (the full body). Each
   label has a space on both sides, so the click target is 3 columns wide. The shown size is bold in the
   accent color. A tab keeps M; from the one row it opens L. `/whatcha compact` opens M.
 - **M**: Threads pins the current thread's head row on top at the full band width (no right column), then
-  its next 3 sub rows with the same indents as L: Claude's `❯` line, the results line, then the tasks from
+  its next 4 sub rows with the same indents as L: Claude's `❯` line, the results line, then the tasks from
   the first unfinished one on, then the plan. As tasks finish, the rows move on under the pinned head.
   Summary shows the head or updating bar, Active and Stuck, and Work left. Artifacts shows the header and the
   newest one.
-- **Height**: L's body is 20% of the terminal rows, at most 80 and at least 3 (24 rows: 4, 50: 10, 120: 24).
+- **Height**: L's body is 20% of the terminal rows, at most 22 and at least 3 (24 rows: 4, 50: 10, 120: 22).
   Claude Code also caps the band at half the terminal (`maxRows`).
+- **Scroll**: ` ▲ ` and ` ▼ ` (3 columns wide) sit left of the tabs in M, and in L when the Threads list is
+  cut. They move the rows under the pinned current-thread row, one row a click; an arrow that cannot move is
+  dim. With no scroll the newest rows show, so new events stay in view; a size or tab change resets it.
+- **Full width**: titles, test runs, commits and errors are kept up to 200 characters, so every row is cut
+  only at the real right edge of the band or its column. A test row names only the test run of a chain
+  (`sed …; tsc && claude plugin test .` reads `claude plugin test .`). A title drops a leading list mark or
+  quote (`- `, `1. `, `> `, `[ ]`).
 - **Show all**: a cut list ends in "+N more". A click, or `/whatcha all`, grows the band to every row
   Claude Code gives it; the engine scrolls the rest. `Show less`, a size button, a tab, or the ring leaving
   the band goes back.
-- **Status row** (S, and the header of M and L): `● Now (X/N): <thread>  ·  ~45% ▰▰▱▱▱`, X of N threads
-  done. The thread name uses all the room up to the tabs, the three sizes and `▾` on the right, and is cut
+- **Status row** (S, and the header of M and L): `▸ Now (X/N): <thread>  ·  ~45% ▰▰▱▱▱`, X of N threads
+  done; the glyph is the thread's own, as in the Threads tab. The thread name uses all the room up to the tabs, the three sizes and `▾` on the right, and is cut
   only at that edge. Under 120 columns the buttons take a second row.
 - **Hidden**: `▾` shrinks the band to one right-aligned button, `▴ @whatcha-doing`.
 - **Tabs**: Threads · Summary · Artifacts, clicked. The band never shows key labels or "press x" text:
@@ -31,7 +38,7 @@ All looks are settled. Nothing is open.
 - **Threads tab, left** (60% of the width): every thread with its tasks and plan steps. The current
   thread first, then open ones, then finished ones, newest first in each group; one blank row between
   threads. Every task and every plan step has its own row. Indents show the hierarchy:
-  1. col 0: the head, `▸` now (accent), `✓` done, `✗` a stuck task, `■` paused; the name in bold;
+  1. col 0: the head, `▸` now (accent), `✓` done, `✗` a stuck task, `⏸` paused (the same glyphs in S, M and L); the name in bold;
      `  ·  now|paused|done|answered`; at the right edge `2 of 6 done` or `plan · 4 steps`, then a dim
      `  ·  sent 10:42`, the local clock time of the owner's last prompt to the thread (`sentAt`, stamped
      at `prompt.submit`);
