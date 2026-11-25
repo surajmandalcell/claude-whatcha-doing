@@ -114,7 +114,9 @@ All looks are settled. Nothing is open.
   and one full-width "Work left" row. Columns by band width, each at least 30 wide with 3-column gaps:
   4 across from 129, 2 x 2 from 63, else 1 (150 cols: 4, 100: 2 x 2, 60: 1). In a column a task name and
   its plain line each wrap to 2 lines, then cut with "…"; with one column they share one row. A cut
-  column ends in "+N more" (whole tasks).
+  column ends in "+N more" (whole tasks). All 4 headers always show; an empty column has one dim line:
+  `nothing finished yet`, `nothing running`, `✓ nothing stuck` (✓ green), `nothing left`. In one column the
+  empty groups share one line (`Stuck: nothing  ·  Left: nothing`).
   While Haiku runs, a thin bar (`━━━╸────  updating with Haiku  3 s`) sits under the head and fills over
   ~8 s without reaching the end; the last board stays below it. With no estimate yet the bar shows alone.
   Haiku runs only while this tab is shown, or on ↻ (refresh), cached until the state changes. The demo shows
