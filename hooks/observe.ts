@@ -314,6 +314,28 @@ export function threadName(reply: string | undefined): string | undefined {
   return s[0]!.toUpperCase() + s.slice(1)
 }
 
+export const SUM_SYSTEM = 'Summarize the request in the message as one line of 8 to 14 plain words: a full phrase that says what is asked. Reply with the line only, no quotes.'
+/** A prompt shorter than this fits its row as typed: no summary is asked for. */
+export const SUM_MIN = 90
+/**
+ * The model's one-line summary of `prompt`, or undefined: under 6 or over 16 words (never cut), ending on a
+ * dangling word, or an echo of the prompt's own opening words.
+ */
+export function promptSum(reply: string | undefined, prompt: string): string | undefined {
+  const s = untag((reply ?? '').split('\n')[0]!).replace(/^(summary|line):\s*/i, '').replace(/["“”*_`]/g, '').replace(/\.$/, '').trim()
+  const w = s.split(/\s+/).filter(Boolean)
+  if (w.length < 6 || w.length > 16 || isFragment(w)) return undefined
+  const echo = (x: string) => x.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
+  if (echo(promptLine(prompt)).startsWith(echo(s))) return undefined
+  return s[0]!.toUpperCase() + s.slice(1)
+}
+/** Caches `sum` on every log entry of this prompt, and on the thread it opened. */
+export const setSum = (o: Observed, text: string, sum: string): Observed => ({
+  ...o,
+  log: o.log.map(a => (a.kind === 'prompt' && a.text === text ? { ...a, sum } : a)),
+  threads: o.threads.map(t => (t.first === text ? { ...t, sum } : t)),
+})
+
 /** The owner's budget per Haiku call (spec): input and output tokens. */
 export const SUMMARY_IN = 600
 export const SUMMARY_OUT = 250

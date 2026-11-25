@@ -153,7 +153,7 @@ test('band: one status row; Threads shows each thread with its tasks and plan, o
     '  ↳ read the CI logs', // no tasks: its last work instead
     expect.stringMatching(/^✓ Bump Node 20 to 22 in CI +┊ {11}┊ \d+:\d\d$/),
     '  ✓ Use Node 22 in the CI workflow',
-    expect.stringMatching(/^✗ Fix checkout tax rounding +┊  11✓   1✗ ┊ \d+:\d\d$/), // "11✓ 1✗": 3 digits kept for each
+    expect.stringMatching(/^✗ Fix checkout tax rounding +┊    11✓ 1✗ ┊ \d+:\d\d$/), // passes and fails: the compact "11✓ 1✗"
     '  ✓ Round tax per line to the cent',
     '  ● Fix the two failing tax tests',
     '  ✗ Update the receipt snapshot',
@@ -490,7 +490,7 @@ test('Replay: every prompt lands as a thread, tangent, nested step or return, an
     '✓ Bump node in the CI workflow to 22',
     '▸ Write short release notes for 0.4.0 in CHANGELOG.md',
   ])
-  expect(list).toContainEqual(expect.stringMatching(/^✓ Add a dark mode option .*… ┊   2✓      ┊ \d+:\d\d$/))
+  expect(list).toContainEqual(expect.stringMatching(/^✓ Add a dark mode option .*… ┊  2 ✓ Pass ┊ \d+:\d\d$/))
 
   await ui.press({ key: 'tab-summary' })
   const sent = m.sent()
@@ -566,7 +566,8 @@ test('thread name: the owner\'s first prompt, cleaned; the on-device name only f
   expect([sentLabel(new Date(2026, 0, 1, 10, 42).getTime()), sentLabel(new Date(2026, 0, 1, 9, 5).getTime())]).toEqual(['sent 10:42', 'sent 9:05'])
   await ui.unmount()
   await prompt('look at the server logs too') // a step of the same thread: no second model run
-  expect(ran.filter(c => c.startsWith('ondevice-')).length).toBe(1)
+  // One model run names the thread, one writes the long prompt's summary; the short later step asks for neither.
+  expect(ran.filter(c => c.startsWith('ondevice-')).length).toBe(2)
   expect(await status()).toContain('Now (0/1): Look at the server logs too') // the status row follows the latest prompt
   // A prompt of only tags and paths names nothing: the on-device name stands in.
   resetOnDevice()
@@ -621,7 +622,7 @@ test('live: a later prompt gets its own row at once, and a thread with no tasks 
   await $.tool.call({ tool: 'Edit', file_path: '/w/spec/icons.md', old_string: 'a', new_string: 'b' } as never)
   await $.tool.call({ tool: 'Edit', file_path: '/w/src/Tile.tsx', old_string: 'a', new_string: 'b' } as never)
   const m = timeline(await ui.drawn())
-  // The work, then the prompt it answers, lowest: the newest prompt stays the last row.
+  // Rows sort by time; at the same time the work keeps its place before the prompt.
   expect(m.slice(1)).toEqual(['  ✎ spec/icons.md', '  ✎ src/Tile.tsx', expect.stringMatching(/^  › Exact: /)])
   expect(m.join('\n')).not.toContain('[Image')
   await ui.unmount()
@@ -657,10 +658,10 @@ test('long names: every ┊ stays in its column and every row is one line, at 15
     const heads = list.filter(l => /^\S/.test(l))
     expect(heads).toHaveLength(2)
     expect(heads[0]).toMatch(/… ┊ +┊ \d+:\d\d$/)
-    expect(heads[1]).toMatch(/… ┊  88✓  12✗ ┊ \d+:\d\d$/)
+    expect(heads[1]).toMatch(/… ┊   88✓ 12✗ ┊ \d+:\d\d$/)
     // Sub rows put their time, and a test run its counts, in the columns, never in the text.
     expect(list).toContainEqual(expect.stringMatching(/^  ◆ c11 +┊ {11}┊ \d+:\d\d$/))
-    expect(list).toContainEqual(expect.stringMatching(/^  ✗ npm test +┊  88✓  12✗ ┊ \d+:\d\d$/))
+    expect(list).toContainEqual(expect.stringMatching(/^  ✗ npm test +┊   88✓ 12✗ ┊ \d+:\d\d$/))
     // The 2-line prompt wraps inside the left area: its second row ends before the first ┊ too.
     const p = list.findIndex(l => l.startsWith('  › And make the index file'))
     expect(list[p]).toMatch(/ ┊ {11}┊ \d+:\d\d$/)
@@ -669,11 +670,63 @@ test('long names: every ┊ stays in its column and every row is one line, at 15
   }
 })
 
-test('test counts: "18✓ 1✗", 3 digits kept for each, 1000 and up as "1.2k"; an empty cell with no count', () => {
-  expect(testCell('npm test: 18 pass, 1 fail')).toEqual([[' 18✓', 'success'], ['   1✗', 'error']])
-  expect(testCell('npm test: 7 pass, 0 fail')).toEqual([['  7✓', 'success'], ['     ']])
-  expect(testCell('npm test: 1234 pass, 0 fail')[0]).toEqual(['1.2k✓', 'success'])
-  expect(testCell('npm test')).toEqual([])
+test('test counts: "18 ✓ Pass" when all pass, "3 ✗ Fail" when all fail, "18✓ 1✗" for both; 1000 and up as "1.2k"', () => {
+  expect(testCell('npm test: 18 pass, 1 fail')).toEqual([['18✓', 'success'], [' 1✗', 'error']])
+  expect(testCell('npm test: 18 pass, 0 fail')).toEqual([['18 ✓ Pass', 'success']])
+  expect(testCell('npm test: 0 pass, 3 fail')).toEqual([['3 ✗ Fail', 'error']])
+  expect(testCell('npm test: 1234 pass, 0 fail')).toEqual([['1.2k ✓ Pass', 'success']])
+  expect([testCell('npm test'), testCell('npm test: 0 pass, 0 fail')]).toEqual([[], []])
+})
+
+test('older prompts: one line, the on-device summary or the cut prompt; only the newest gets 2; sub rows in time order', async ($, on) => {
+  const m = engine(on, e => (String(e.command ?? '').includes('test') ? '# pass 4\n# fail 0' : 'ok'))
+  let reply = 'Make the index rebuild itself whenever any rule file changes.'
+  on('fs.read', () => ({ value: 'swift source' }))
+  on('fs.exists', () => ({ value: true }))
+  on('process.run', (_, e) => {
+    const stdin = String(e.init?.stdin ?? '')
+    const sum = stdin.includes('Summarize')
+    const out = e.argv[0]!.includes('ondevice-') ? { exitCode: 0, stdout: !sum ? 'Graph rule for references' : stdin.includes('graph rule') ? 'Keep an index of references from global rules to every project' : reply } : { exitCode: 0, stdout: '' }
+    return { value: { stderr: '', isStdoutTruncated: false, isStderrTruncated: false, ...out } }
+  })
+  resetOnDevice()
+  const settle = () => new Promise(r => setTimeout(r, 20))
+  const prompt = (text: string) => $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } } as never)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const long = 'and make the index file update itself every time a rule file changes, and show me which projects point at each global rule'
+  await prompt('can you create a graph rule which keeps an index of references from the global rules to the projects')
+  await m.clock.advance(60_000)
+  await prompt(long)
+  await settle()
+  await m.clock.advance(60_000)
+  await $.tool.call({ tool: 'Bash', command: 'npm test' } as never)
+  await m.clock.advance(60_000)
+  reply = long // an echo of the prompt is no summary: the prompt stays, cut at the first ┊
+  await prompt(`${long} too`)
+  await settle()
+  await m.clock.advance(60_000)
+  await $.tool.call({ tool: 'Edit', file_path: '/w/src/index.ts', old_string: 'a', new_string: 'b' } as never)
+  await prompt('one more thing: also list the projects with no rules at all, and keep that list sorted by name please')
+  await settle()
+  const ui = await $.ui.mount(BAND(120, 125))
+  await ui.press({ key: 'tab-threads' })
+  const list = screen(bodyOf(await ui.drawn()), 120)
+  ui.unmount()
+  const rows = subText(list)
+  // The thread name is the summary of its long first prompt, on one row.
+  expect(nameCol(rows[0]!)).toBe('▸ Keep an index of references from global rules to every project')
+  expect(rows.slice(1, 5)).toEqual([
+    '  › Make the index rebuild itself whenever any rule file changes', // an older prompt: its summary, one row
+    '  ✓ npm test',
+    expect.stringMatching(/^  › And make the index file update itself every time .*…$/), // a bad summary: the cut prompt
+    '  ✎ src/index.ts',
+  ])
+  // The newest prompt of the timeline is the only one on 2 rows.
+  expect(rows.slice(5)).toEqual([expect.stringMatching(/^  › One more thing: also list/), expect.stringMatching(/^    \S/)])
+  expect(list[2]).toMatch(/┊  4 ✓ Pass ┊/) // green, alone: no fail count beside it
+  // Sub rows in time order, oldest first: prompts mixed in with work.
+  const times = list.slice(1).map(l => l.match(/(\d+):(\d\d)$/)).filter(Boolean).map(x => +x![1]! * 60 + +x![2]!)
+  expect(times).toEqual([...times].sort((a, b) => a - b))
 })
 
 test('engine wrappers: pasted_content tags go, the text inside stays; the compaction summary is never a thread', async () => {

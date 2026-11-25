@@ -5,7 +5,7 @@ import type { ArtifactRow, Artifacts, Band, Observed, Summary, SummaryCache, Tab
 import {
   demoArtifacts, demoObserved, demoSummary, emptyObserved, hash, isTestCommand, onAgent, onArtifact, onCommit, onEdit,
   dropEngineText, isEngineText, noticeOf, promptLine, untag, onNotice, onError, onPlan, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, sentLabel, short, stamp, timeOf, transcriptTimes, type Times, unlist, testResult, SUMMARY_SYSTEM, summaryInput,
-  summaryPrompt, SUMMARY_OUT, NAME_SYSTEM, threadName,
+  summaryPrompt, SUMMARY_OUT, NAME_SYSTEM, threadName, SUM_SYSTEM, SUM_MIN, promptSum, setSum,
 } from './observe'
 import { onDevice } from './ondevice'
 
@@ -98,10 +98,18 @@ export const register: Register = on => {
         // Rebuild when the transcript has prompts we never saw, or times for prompts rebuilt before without them.
         if (promptsIn(msgs) <= said.length && !(times.prompts.length && said.some(a => a.at === undefined))) return o
         const r = replay(msgs, times)
-        // Keep the on-device names and send times of threads we already knew.
-        return { ...r, threads: r.threads.map(t => ({ ...o.threads.find(x => x.title === t.title), ...t })) }
+        // Keep the on-device names and send times of threads we already knew,
+        // and the summaries of prompts we already knew, so the model never writes one twice.
+        const sum = (a: Observed['log'][number]) => o.log.find(x => x.kind === 'prompt' && x.text === a.text)?.sum
+        return {
+          ...r,
+          threads: r.threads.map(t => ({ ...o.threads.find(x => x.title === t.title), ...t })),
+          log: r.log.map(a => (a.kind === 'prompt' && sum(a) ? { ...a, sum: sum(a) } : a)),
+        }
       }).catch(() => {})
     }
+    // Rebuilt or older long prompts get their one-line summary in the background, newest first.
+    summarize($, (await read($, observed)).log.filter(a => a.kind === 'prompt' && !a.sum).slice(-LOAD_SUMS).reverse())
     // Artifacts outlive the session: one store key per project folder.
     const key = `artifacts:${e.cwd}`
     const rows = ((await $.store.get(key).catch(() => undefined)) as ArtifactRow[] | undefined) ?? []
@@ -139,18 +147,12 @@ export const register: Register = on => {
       // A new thread's first prompt: the on-device model names it in the background; the prompt never waits.
       const t = byId(o, o.current)
       if (!notice && t && !t.name && o.log.filter(a => a.kind === 'prompt' && a.thread === t.id).length === 1) {
-        const host = {
-          plugin: { root: $.plugin.root },
-          // The engine wants a literal name here; HOME is the only one onDevice reads.
-          env: { get: () => $.env.get('HOME') },
-          fs: { read: (p: string) => $.fs.read(p), exists: (p: string) => $.fs.exists(p) },
-          process: { run: (argv: string[], opts?: { stdin?: string; timeoutMs?: number }) => $.process.run(argv, opts) },
-        } as unknown as Parameters<typeof onDevice>[0]
-        void onDevice(host, NAME_SYSTEM, untag(e.text).slice(0, 2000))
+        void ask($, NAME_SYSTEM, e.text)
           .then(r => threadName(r))
           .then(name => name === undefined ? undefined : update($, observed, x => ({ ...x, threads: x.threads.map(y => (y.id === t.id ? { ...y, name } : y)) })))
           .catch(() => {})
       }
+      if (!notice) summarize($, [o.log.findLast(a => a.kind === 'prompt')!])
     }
     return next(e)
   })
@@ -405,6 +407,33 @@ export function replay(msgs: SessionMessage[], times: Times = { prompts: [], too
   return o
 }
 
+/** One on-device model call (onDevice reads only HOME, the helper source and its binary). */
+function ask($: EngineInterface, system: string, text: string): Promise<string | undefined> {
+  const host = {
+    plugin: { root: $.plugin.root },
+    // The engine wants a literal name here; HOME is the only one onDevice reads.
+    env: { get: () => $.env.get('HOME') },
+    fs: { read: (p: string) => $.fs.read(p), exists: (p: string) => $.fs.exists(p) },
+    process: { run: (argv: string[], opts?: { stdin?: string; timeoutMs?: number }) => $.process.run(argv, opts) },
+  } as unknown as Parameters<typeof onDevice>[0]
+  return onDevice(host, system, untag(text).slice(0, 2000))
+}
+
+// One model run at a time, in the background: a summary never blocks a prompt or a redraw.
+let sums: Promise<unknown> = Promise.resolve()
+/** Asks the on-device model for a one-line summary of each long prompt that has none; a bad reply leaves the cut prompt. */
+function summarize($: EngineInterface, prompts: Observed['log']): void {
+  for (const p of prompts) {
+    if (p.sum || [...promptLine(p.text)].length < SUM_MIN) continue
+    sums = sums.then(() => ask($, SUM_SYSTEM, p.text))
+      .then(r => promptSum(r, p.text))
+      .then(sum => (sum ? update($, observed, o => setSum(o, p.text, sum)) : undefined))
+      .catch(() => {})
+  }
+}
+/** Prompts summarized at load, newest first: the rows most likely in view. */
+const LOAD_SUMS = 20
+
 /** The tail of this session's transcript file (the last 4 MB, the read limit), or '' when it cannot be read. */
 async function transcriptTail($: EngineInterface, cwd: string): Promise<string> {
   // shortcut: assumes ~/.claude (no CLAUDE_CONFIG_DIR); read it if the band shows no times there.
@@ -494,10 +523,10 @@ function fit({ Text, Button }: Els, lines: JSX.Element[], n: number, act: Acts, 
 // ---- Threads tab: one timeline, each thread with its tasks and plan steps ----
 
 /**
- * A thread's shown name: its first prompt, cleaned of tags, links and paths. When that leaves nothing, the
- * on-device model's name (checked again, so a fragment saved before 1.0.18 drops), else the title.
+ * A thread's shown name: the on-device model's one-line summary of its first prompt, else that prompt cleaned of
+ * tags, links and paths. When that leaves nothing, the model's name (checked again), else the title.
  */
-const nameOf = (t: Thread) => promptLine(t.first ?? '') || ((t.name ? threadName(t.name) : undefined) ?? unlist(untag(t.title)))
+const nameOf = (t: Thread) => t.sum || promptLine(t.first ?? '') || ((t.name ? threadName(t.name) : undefined) ?? unlist(untag(t.title)))
 /** One glyph per thread state, the same in S, M and L: ▸ now, ✓ done, ✗ stuck, ⏸ paused. */
 const headGlyph = (o: Observed, t: Thread): [string, string?] =>
   t.id === o.current ? ['▸', 'suggestion'] : isOver(t) ? ['✓', 'success']
@@ -511,15 +540,27 @@ const running = (t: Thread) => t.todos.find(d => d.status === 'in_progress')
 /** A cell's text in parts, each with its color (none: dim). */
 type Part = [string, string?]
 const num = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
-/** "18✓ 1✗": a test run's counts, 3 digits reserved each (1000+ reads "1.2k"); empty when no count was read. */
+/**
+ * A test run's counts: "18 ✓ Pass" (green) when all pass, "3 ✗ Fail" (red) when all fail, else "18✓ 1✗";
+ * 1000+ reads "1.2k". Empty when no count was read.
+ */
 export function testCell(text = ''): Part[] {
   const m = text.match(/(\d+) pass, (\d+) fail/)
   if (!m) return []
-  return [[`${num(+m[1]!).padStart(3)}✓`, 'success'], +m[2]! ? [` ${num(+m[2]!).padStart(3)}✗`, 'error'] : [' '.repeat(5)]]
+  const [p, f] = [+m[1]!, +m[2]!]
+  if (!f) return p ? [[`${num(p)} ✓ Pass`, 'success']] : []
+  if (!p) return [[`${num(f)} ✗ Fail`, 'error']]
+  return [[`${num(p)}✓`, 'success'], [` ${num(f)}✗`, 'error']]
 }
 const lenOf = (c: Part[]) => c.reduce((a, [s]) => a + [...s].length, 0)
-/** The tests column's least width: "999✓ 999✗". */
+/** The tests column's least width: "18 ✓ Pass"; a wider cell widens it. */
 const TESTS_W = 9
+
+/** Rows with a time sorted oldest first into the slots timed rows held; rows with no time keep their place. */
+export function byTime<T extends { at?: number }>(xs: T[]): T[] {
+  const timed = xs.filter(x => x.at !== undefined).sort((a, b) => a.at! - b.at!)
+  return xs.map(x => (x.at === undefined ? x : timed.shift()!))
+}
 /** The time column's width: "23:59". */
 const TIME_W = 5
 const clock = (at: number) => sentLabel(at).slice(5)
@@ -566,8 +607,8 @@ function row({ Box, Text }: Els, testsW: number, left: JSX.Element, tests: Part[
 /**
  * One thread as rows, each its own line: the head (glyph, name; its last test run and sent time in the columns),
  * the plan (folded to "Plan · N steps" unless current), every task (or with no tasks, the last 3 things done:
- * edits, test runs, commits, helpers, each with its time), the later prompts (`› <prompt>`, the last 3, up to 2
- * rows each), then `❯ <activeForm>…` of the running task. So the newest is lowest, in view when the band opens.
+ * edits, test runs, commits, helpers) and the later prompts (`› <prompt>`, the last 3), all sorted by time with prompts
+ * mixed in, then `❯ <activeForm>…` of the running task. Only the newest prompt of the timeline takes 2 rows.
  */
 function threadBlock(els: Els, o: Observed, t: Thread, testsW: number, cols: number): JSX.Element[] {
   const { Text } = els
@@ -596,30 +637,31 @@ function threadBlock(els: Els, o: Observed, t: Thread, testsW: number, cols: num
       return R(<Text wrap="truncate-end">{IN(4 + 2 * (s.depth + (underHeading ? 1 : 0)))}<Text dimColor>{s.mark}</Text> {s.text}</Text>)
     }) : []),
   ] : []
-  // The left area: the band less both columns and the "  › " indent; a prompt wraps inside it.
+  // The left area: the band less both columns and the "  › " indent; the newest prompt wraps inside it.
   const w = cols - (testsW + 3) - (TIME_W + 3) - 4
-  // The first prompt names the thread; each later one gets up to 2 rows, cut at the end of the second.
-  const prompts = mine.filter(a => a.kind === 'prompt').slice(1).slice(-3).flatMap(a => {
-    const [one, two] = twoLines(promptLine(a.text), w)
-    return [
+  const newest = o.log.findLast(a => a.kind === 'prompt')
+  // The first prompt names the thread. Only the newest prompt of the timeline gets 2 rows; each older one gets
+  // one: the model's summary when it wrote one, else the prompt cut at the first ┊.
+  const prompts = mine.filter(a => a.kind === 'prompt').slice(1).slice(-3).map(a => {
+    const [one, two] = a === newest ? twoLines(promptLine(a.text), w) : [a.sum ?? promptLine(a.text)]
+    return { at: a.at, rows: [
       R(<Text wrap="truncate-end">{IN(2)}<Text dimColor>› </Text>{one}</Text>, [], a.at),
       ...(two ? [R(<Text wrap="truncate-end">{IN(4)}{two}</Text>)] : []),
-    ]
+    ] }
   })
   const work = tasks.length ? [] : mine.filter(a => WORK[a.kind]).slice(-3).map(a => {
     const bad = a.kind === 'test' && a.text.startsWith('tests fail')
     const [mark, color] = bad ? ['✗', 'error'] : WORK[a.kind]!
     // A test run's counts go to the tests column, not the text.
     const text = a.kind === 'test' ? a.text.replace(/^tests (pass|fail): /, '').replace(/: \d+ pass, \d+ fail$/, '') : a.text.replace(/^(commit|helper): /, '')
-    return R(<Text wrap="truncate-end">{IN(2)}<Text color={color} dimColor={!color}>{mark}</Text> <Text dimColor>{text}</Text></Text>, a.kind === 'test' ? testCell(a.text) : [], a.at)
+    return { at: a.at, rows: [R(<Text wrap="truncate-end">{IN(2)}<Text color={color} dimColor={!color}>{mark}</Text> <Text dimColor>{text}</Text></Text>, a.kind === 'test' ? testCell(a.text) : [], a.at)] }
   })
   // Oldest to newest, like the chat: what is live (the latest prompt, the running task) is the lowest row.
   return [
     lead,
     ...plan,
     ...tasks,
-    ...work,
-    ...prompts,
+    ...byTime([...work, ...prompts]).flatMap(x => x.rows),
     ...(run ? [R(<Text wrap="truncate-end">{IN(2)}<Text dimColor>❯ </Text><Text color="suggestion">{run.activeForm ?? run.text}…</Text></Text>)] : []),
   ]
 }

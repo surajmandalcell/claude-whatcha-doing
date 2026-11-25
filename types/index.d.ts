@@ -16,6 +16,8 @@ export type Thread = {
   prompt?: string
   /** The prompt that opened this thread (first 300 chars, one line): its shown name. */
   first?: string
+  /** The on-device model's one-line summary of `first` (8-14 words), shown when the prompt is too long for one row. */
+  sum?: string
   /** A 3-6 word name the on-device model wrote from the first prompt; the title stands in without it. */
   name?: string
   /** The steps of the last plan Claude wrote for this thread (ExitPlanMode). */
@@ -30,6 +32,8 @@ export type Activity = {
   kind: 'prompt' | 'return' | 'edit' | 'test' | 'error' | 'agent' | 'todo' | 'commit'
   text: string
   thread: number
+  /** A prompt's one-line summary by the on-device model, for its row when the prompt is too long. */
+  sum?: string
   /** When it happened (ms); absent on entries rebuilt from the transcript. */
   at?: number
 }
