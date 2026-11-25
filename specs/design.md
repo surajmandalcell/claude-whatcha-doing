@@ -13,14 +13,14 @@ All looks are settled. Nothing is open.
   label has a space on both sides, so the click target is 3 columns wide. The shown size is bold in the
   accent color. A tab keeps M; from the one row it opens L. `/whatcha compact` opens M.
 - **M**: Threads pins the current thread's head row on top at the full band width (no right column), then
-  its next 4 sub rows with the same indents as L: Claude's `❯` line, the results line, then the tasks from
-  the first unfinished one on, then the plan. As tasks finish, the rows move on under the pinned head.
+  its 2 newest sub rows with the same indents as L (Claude's `❯` line, the results line), then the 2
+  previous threads, one dim row each (see "Earlier threads"). ▲ ▼ go further back through older threads.
   Summary shows the head or updating bar, Active and Stuck, and Work left. Artifacts shows the header and the
   newest one.
 - **Height**: L's body is 20% of the terminal rows, at most 22 and at least 3 (24 rows: 4, 50: 10, 120: 22).
   Claude Code also caps the band at half the terminal (`maxRows`).
 - **Scroll**: ` ▲ ` and ` ▼ ` (3 columns wide) sit left of the tabs in M, and in L when the Threads list is
-  cut. They move the rows under the pinned current-thread row, one row a click; an arrow that cannot move is
+  cut. They move the rows under the pinned current-thread row one row a click, further back in time; an arrow that cannot move is
   dim. With no scroll the newest rows show, so new events stay in view; a size or tab change resets it.
 - **Full width**: titles, test runs, commits and errors are kept up to 200 characters, so every row is cut
   only at the real right edge of the band or its column. A test row names only the test run of a chain
@@ -35,9 +35,11 @@ All looks are settled. Nothing is open.
 - **Hidden**: `▾` shrinks the band to one right-aligned button, `▴ @whatcha-doing`.
 - **Tabs**: Threads · Summary · Artifacts, clicked. The band never shows key labels or "press x" text:
   keys go to the prompt box, and the band almost never has focus.
-- **Threads tab, left** (60% of the width): every thread with its tasks and plan steps. The current
-  thread first, then open ones, then finished ones, newest first in each group; one blank row between
-  threads. Every task and every plan step has its own row. Indents show the hierarchy:
+- **Threads tab, left** (60% of the width): the current thread with its tasks and plan steps, in
+  at most 60% of the body rows (when it does not fit, the done tasks and the plan steps fold away and
+  `Plan · N steps` stays). Then a blank row and the earlier threads, open ones first, newest first, one
+  row each: **Earlier threads**: glyph, name, and at the right edge the result counts and `sent 19:20`.
+  Show all draws every thread in full, one blank row between threads. Every task and plan step has its own row. Indents show the hierarchy:
   1. col 0: the head, `▸` now (accent), `✓` done, `✗` a stuck task, `⏸` paused (the same glyphs in S, M and L); the name in bold;
      `  ·  now|paused|done|answered`; at the right edge `2 of 6 done` or `plan · 4 steps`, then a dim
      `  ·  sent 10:42`, the local clock time of the owner's last prompt to the thread (`sentAt`, stamped
