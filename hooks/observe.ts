@@ -87,8 +87,12 @@ export const unlist = (s: string) => s.replace(LIST, '')
 /** Drops the composer's attachment tags: "[Image #1]", "[Pasted text #2 +40 lines]", "[File #3]". */
 export const untag = (s: string) => s.replace(/\[[A-Z][\w ]* #\d+[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim()
 /** A prompt as a sub row shows it: no tags, no list mark, one line. */
-export const promptLine = (s: string) => unlist(untag(s))
-const CUE = /^\s*((ok(ay)?|so)[,\s]+)?((wait|btw|by the way|side question|quick question|unrelated|new thing|also|next|back to [^:,.]*|go(ing)? back( to [^:,.]*)?)\b[,:\s-]*)*/i
+export const promptLine = (s: string) => {
+  // Links and absolute paths are noise in a row ("/Users/x/Pictures bruh" reads "Bruh"); so are "wait," and "new thing:".
+  const t = unlist(untag(s).replace(/(^|\s)(https?:\/\/|~\/|\.{0,2}\/)\S*/g, ' ').replace(/\s+/g, ' ').trim()).replace(CUE, '').trim()
+  return t && t[0]!.toUpperCase() + t.slice(1)
+}
+const CUE = /^\s*((ok(ay)?|so|um|uh)[,\s]+)*((wait|btw|by the way|side question|quick question|unrelated|new thing|also|next|back to [^:,.]*|go(ing)? back( to [^:,.]*)?)\b[,:\s-]*)*/i
 const TANGENT = /^\s*(wait|btw|by the way|side question|quick question)\b|\bunrelated\b/i
 const RETURN = /^\s*((ok(ay)?|so)[,\s]+)?(back to|go(ing)? back)\b/i
 const NEW = /^\s*((ok(ay)?|so)[,\s]+)?(new thing|new task|also|next)\b/i
@@ -117,8 +121,9 @@ export function onPrompt(o: Observed, text: string): Observed {
   else if (OK.test(text) && now.parent) o = open(o, titleOf(text), now.id)
   else if (isNewTopic(o, now, text)) o = open(o, titleOf(text))
   else o = setThread(o, now.id, t => ({ ...t, state: 'active' }))
-  o = setThread(o, o.current, t => ({ ...t, prompt: text.trim().slice(0, 300) }))
-  return log(o, 'prompt', short(text, 80))
+  o = setThread(o, o.current, t => ({ ...t, first: t.first ?? short(text, 300), prompt: text.trim().slice(0, 300) }))
+  // 300: a prompt row shows up to 2 lines of a wide band.
+  return log(o, 'prompt', short(text, 300))
 }
 
 /**
@@ -138,8 +143,40 @@ export const stamp = (o: Observed, at: number, sent = false): Observed => {
   // The newest log entry is what this event added: it takes the time, for the sub rows' "· 12:07".
   const last = o.log.at(-1)
   if (last && last.at === undefined) o = { ...o, log: [...o.log.slice(0, -1), { ...last, at }] }
-  return setThread(o, o.current, t => ({ ...t, startedAt: t.startedAt ?? at, lastAt: at, sentAt: sent ? at : t.sentAt }))
+  return setThread(o, o.current, t => ({ ...t, startedAt: t.startedAt ?? at, lastAt: at, sentAt: sent ? at : t.sentAt, resAt: sent ? undefined : t.resAt }))
 }
+
+/** The current thread's reply ended at `at`: its "res" cell. */
+export const replied = (o: Observed, at: number): Observed => setThread(o, o.current, t => ({ ...t, resAt: at }))
+
+/** One prompt the owner typed, as the transcript file stamps it: when it was sent and when its turn ended. */
+export type PromptTime = { text: string; at: number; res?: number }
+const key = (s: string) => s.replace(/\s+/g, ' ').trim().slice(0, 60)
+
+/**
+ * The times of each typed prompt in a transcript .jsonl (any tail of it; a cut first line is skipped):
+ * the user line's `timestamp`, and the last `end_turn` reply before the next prompt.
+ */
+export function transcriptTimes(jsonl: string): PromptTime[] {
+  const out: PromptTime[] = []
+  for (const line of jsonl.split('\n')) {
+    let j: { type?: string; isMeta?: boolean; timestamp?: string; message?: { content?: unknown; stop_reason?: string } }
+    try { j = JSON.parse(line) } catch { continue }
+    const at = Date.parse(j.timestamp ?? '')
+    if (Number.isNaN(at)) continue
+    if (j.type === 'assistant' && j.message?.stop_reason === 'end_turn' && out.length) out.at(-1)!.res = at
+    if (j.type !== 'user' || j.isMeta) continue
+    const c = j.message?.content
+    const blocks = typeof c === 'string' ? [{ type: 'text', text: c }] : Array.isArray(c) ? (c as { type?: string; text?: string }[]) : []
+    if (!blocks.length || blocks.some(b => b.type === 'tool_result')) continue
+    const text = blocks.filter(b => b.type === 'text').map(b => b.text ?? '').join('\n')
+    if (text.trim()) out.push({ text: key(text), at })
+  }
+  return out
+}
+
+/** The time entry for a prompt `text`, searched from `from` on; its index, or -1. */
+export const timeOf = (times: PromptTime[], text: string, from: number) => times.findIndex((p, i) => i >= from && p.text === key(text))
 
 /** "sent 10:42": the local clock time of the thread's last prompt. */
 export const sentLabel = (at: number) => {
@@ -362,7 +399,7 @@ export const demoObserved = (now: number): Observed => ({
     {
       id: 1, title: 'Fix checkout tax rounding', state: 'paused',
       prompt: 'the tax on a $10 mug shows $0.82, it should be $0.83. fix the rounding in src/checkout/tax.ts and run the tests',
-      startedAt: now - 130 * MIN, sentAt: now - 130 * MIN, lastAt: now - 25 * MIN,
+      startedAt: now - 130 * MIN, sentAt: now - 130 * MIN, lastAt: now - 25 * MIN, resAt: now - 25 * MIN,
       todos: [
         { text: 'Round tax per line to the cent', status: 'completed' },
         { text: 'Fix the two failing tax tests', status: 'in_progress', activeForm: 'Fixing the two failing tax tests' },
@@ -373,12 +410,12 @@ export const demoObserved = (now: number): Observed => ({
     {
       id: 2, title: 'Why is CI red?', parent: 1, state: 'answered', todos: [], files: [],
       prompt: 'wait, why is CI red on main since this morning? just look, short answer',
-      startedAt: now - 110 * MIN, sentAt: now - 110 * MIN, lastAt: now - 100 * MIN,
+      startedAt: now - 110 * MIN, sentAt: now - 110 * MIN, lastAt: now - 100 * MIN, resAt: now - 100 * MIN,
     },
     {
       id: 3, title: 'Bump Node 20 to 22 in CI', parent: 2, state: 'done',
       prompt: 'ok bump Node 20 to 22 in the CI workflow and .nvmrc, then commit',
-      startedAt: now - 95 * MIN, sentAt: now - 95 * MIN, lastAt: now - 80 * MIN,
+      startedAt: now - 95 * MIN, sentAt: now - 95 * MIN, lastAt: now - 80 * MIN, resAt: now - 80 * MIN,
       todos: [{ text: 'Use Node 22 in the CI workflow', status: 'completed' }],
       files: ['.github/workflows/ci.yml', '.nvmrc', 'package.json'],
     },

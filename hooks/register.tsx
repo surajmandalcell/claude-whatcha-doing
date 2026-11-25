@@ -4,7 +4,7 @@ import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Regist
 import type { ArtifactRow, Artifacts, Band, Observed, Summary, SummaryCache, Tab, Thread, Todo } from '../types'
 import {
   demoArtifacts, demoObserved, demoSummary, emptyObserved, hash, isTestCommand, onAgent, onArtifact, onCommit, onEdit,
-  dropEngineText, isEngineText, noticeOf, promptLine, untag, onNotice, onError, onPlan, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, sentLabel, short, stamp, unlist, testResult, SUMMARY_SYSTEM, summaryInput,
+  dropEngineText, isEngineText, noticeOf, promptLine, untag, onNotice, onError, onPlan, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, sentLabel, short, stamp, replied, timeOf, transcriptTimes, type PromptTime, unlist, testResult, SUMMARY_SYSTEM, summaryInput,
   summaryPrompt, SUMMARY_OUT, NAME_SYSTEM, threadName,
 } from './observe'
 import { onDevice } from './ondevice'
@@ -67,16 +67,18 @@ type Reads = {
   now(): Promise<number>
 }
 async function load(r: Reads): Promise<Data> {
-  const now = await r.now()
-  const isDemo = await r.demo()
+  const [now, isDemo, o, cache, arts, tab] = await Promise.all([r.now(), r.demo(), r.observed(), r.summary(), r.artifacts(), r.tab()])
   return {
     now,
-    o: isDemo ? demoObserved(now) : await r.observed(),
-    cache: isDemo ? { key: 'demo', summary: demoSummary } : await r.summary(),
-    arts: isDemo ? demoArtifacts(now) : (await r.artifacts()).rows,
-    tab: await r.tab(),
+    o: isDemo ? demoObserved(now) : o,
+    cache: isDemo ? { key: 'demo', summary: demoSummary } : cache,
+    arts: isDemo ? demoArtifacts(now) : arts.rows,
+    tab,
   }
 }
+
+// shortcut: the last drawn timeline's scroll room, for the wheel hook; one band per process, keep per session if that changes.
+let roomNow = 0
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -90,9 +92,12 @@ export const register: Register = on => {
     // Loaded mid-session (a reload, a resume): the transcript holds prompts we never saw, so rebuild from it.
     const msgs = await $.session.messages().catch(() => undefined)
     if (Array.isArray(msgs)) {
+      const times = transcriptTimes(await transcriptTail($, e.cwd).catch(() => ''))
       await update($, observed, o => {
-        if (promptsIn(msgs) <= o.log.filter(a => a.kind === 'prompt').length) return o
-        const r = replay(msgs)
+        const said = o.log.filter(a => a.kind === 'prompt')
+        // Rebuild when the transcript has prompts we never saw, or times for prompts rebuilt before without them.
+        if (promptsIn(msgs) <= said.length && !(times.length && said.some(a => a.at === undefined))) return o
+        const r = replay(msgs, times)
         // Keep the on-device names and send times of threads we already knew.
         return { ...r, threads: r.threads.map(t => ({ ...o.threads.find(x => x.title === t.title), ...t })) }
       }).catch(() => {})
@@ -154,7 +159,10 @@ export const register: Register = on => {
 
   // The main loop's answer closes the current thread (done or answered); a subagent's does not.
   on('turn.complete', async ($, e, next) => {
-    if (!e.agentId) await update($, observed, o => onTurnEnd(o, e.reason === 'answer')).catch(() => {})
+    if (!e.agentId) {
+      const at = await $.clock.now()
+      await update($, observed, o => replied(onTurnEnd(o, e.reason === 'answer'), at)).catch(() => {})
+    }
     const r = await next(e)
     // An open Summary tab follows the work: re-ask Haiku once per turn, only when the threads changed (the key dedups).
     if (!e.agentId && (await read($, tabAtom)) === 'summary' && ['compact', 'expanded'].includes((await read($, band)).mode)) {
@@ -189,14 +197,17 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     // Other mods share this slot: draw theirs below ours. next(e) rejects when nothing answers beneath (tests).
-    const below = await next(e).catch(() => undefined)
+    // The mods below, our state and the band read at once: one after another made every click redraw late.
+    const [below, d, b] = await Promise.all([
+      next(e).catch(() => undefined),
+      load({
+        demo: () => read($, demo), observed: () => read($, observed), summary: () => read($, summary),
+        artifacts: () => read($, artifacts), tab: () => read($, tabAtom), now: () => $.clock.now(),
+      }),
+      read($, band),
+    ])
     const els = $.ui.resolve(e)
     const { Box, Text, Button } = els
-    const d = await load({
-      demo: () => read($, demo), observed: () => read($, observed), summary: () => read($, summary),
-      artifacts: () => read($, artifacts), tab: () => read($, tabAtom), now: () => $.clock.now(),
-    })
-    const b = await read($, band)
     const io: SummaryIo = {
       state: async () => [await read($, demo), await read($, observed), await read($, summary)],
       set: c => update($, summary, () => c),
@@ -241,24 +252,33 @@ export const register: Register = on => {
     const cap = b.all ? Infinity : Math.max(3, Math.min(bodyCap(e.viewport?.rows ?? 50), e.props.maxRows - (isNarrow ? 3 : 2)))
     // M's rows: 5, and never past the engine's maxRows less the header and hairline (a taller tree scrolls, hiding rows).
     const mRows = Math.max(1, Math.min(COMPACT_ROWS, e.props.maxRows - (isNarrow ? 3 : 2)))
-    // How far ▲ ▼ move the timeline: whenever it is taller than the shown rows.
-    const room = !isOpen || tab !== 'threads' || b.all ? 0 : roomOf(timeline(els, o).rows.length, b.mode === 'compact' ? mRows : cap)
-    const off = Math.min(b.scroll ?? 0, room)
-    const scrollTo = (n: number) => update($, band, (x): Band => ({ ...x, scroll: n }))
+    // The timeline window: oldest at the top, newest at the bottom; it opens on the newest (back 0).
+    const shown = b.mode === 'compact' ? mRows : cap
+    const room = !isOpen || tab !== 'threads' || b.all ? 0 : roomOf(timeline(els, o, cols).rows.length, shown)
+    roomNow = room
+    const back = Math.min(b.scroll ?? 0, room)
+    const off = room - back
+    // One click moves a page, less one row, so the row at the edge stays in view.
+    const page = Math.max(1, shown - 1)
+    const scrollTo = (n: number) => update($, band, (x): Band => ({ ...x, scroll: Math.max(0, Math.min(room, n)) }))
     // 3 columns wide like the sizes; an arrow that cannot move stays in place, dim, so nothing shifts.
     const arrow = (key: string, glyph: string, can: boolean, to: number) =>
       can ? <Button key={key} plain label={` ${glyph} `} onPress={() => scrollTo(to)} /> : <Text dimColor>{` ${glyph} `}</Text>
     const [g, tone] = now ? headGlyph(o, now) : ['●', 'suggestion']
+    // The latest prompt as typed, cleaned; the thread's name only when the prompt was all tags, links or paths.
+    const said = now && (promptLine(now.prompt ?? '') || nameOf(now))
     const status = (
       <Text wrap="truncate-end">
-        <Text color={tone}>{g}</Text> Now ({over}/{o.threads.length}): <Text bold>{now ? nameOf(now) : 'waiting for the first prompt'}</Text>
+        <Text color={tone}>{g}</Text> Now ({over}/{o.threads.length}): <Text bold>{said || 'waiting for the first prompt'}</Text>
       </Text>
     )
     const buttons = (
-      <Box flexDirection="row" gap={isNarrow ? 1 : 2}>
+      <Box flexDirection="row" gap={isNarrow ? 1 : 2} flexShrink={0}>
         {!isNarrow && <Text dimColor>│</Text>}
-        {room > 0 && arrow('up', '▲', off > 0, off - 1)}
-        {room > 0 && arrow('down', '▼', off < room, off + 1)}
+        {room > 0 && arrow('top', '⤒', back < room, room)}
+        {room > 0 && arrow('up', '▲', back < room, back + page)}
+        {room > 0 && arrow('down', '▼', back > 0, back - page)}
+        {room > 0 && arrow('bottom', '⤓', back > 0, 0)}
         {/* No hotkey labels: keys go to the prompt, the band takes clicks. */}
         {TABS.map(([id, label]) => (
           // Dim tabs read as disabled: every tab is full text, the open one bold in the accent color.
@@ -283,7 +303,7 @@ export const register: Register = on => {
     ) : (
       <Box flexDirection="row" alignItems="center" gap={1} width={width}>
         {/* The title takes every column up to the │ before the tabs. */}
-        <Box flexGrow={1} flexShrink={1}>{status}</Box>
+        <Box flexGrow={1} flexShrink={1} minWidth={0}>{status}</Box>
         {buttons}
       </Box>
     )
@@ -291,8 +311,16 @@ export const register: Register = on => {
 
     // Push, not overlay: an absolute Box with a negative top is clipped to the band, so it cannot paint over the chat.
     const rule = <Text dimColor wrap="truncate-end">{'─'.repeat(cols)}</Text>
-    const main = b.mode === 'compact' ? <Box flexDirection="column">{brief(els, d, act, cols, off, mRows)}</Box> : body(els, d, act, cap, cols, off)
+    const main = b.mode === 'compact' ? <Box flexDirection="column">{brief(els, d, act, cols, off, mRows)}</Box> : body(els, d, act, cap, cols, b.all ? 0 : off)
     return stack(<Box flexDirection="column" width={width}>{row}{rule}{main}</Box>)
+  }).catch(($, e, next) => next(e))
+
+  // The wheel over the band moves the timeline like ▲ ▼, a row a tick; the engine's own window stays put.
+  on('ui.scroll', async ($, e, next) => {
+    const b = await read($, band)
+    if (e.component !== 'AbovePrompt' || !roomNow || b.all || !['compact', 'expanded'].includes(b.mode)) return next(e)
+    await update($, band, (x): Band => ({ ...x, scroll: Math.max(0, Math.min(roomNow, (x.scroll ?? 0) - e.by)) }))
+    return {}
   }).catch(($, e, next) => next(e))
 
   // Escape hands the keys back and the ring leaves our band: show all goes back to normal.
@@ -351,11 +379,12 @@ const promptsIn = (msgs: SessionMessage[]) => msgs.filter(m => isPrompt(m) && !n
 
 /**
  * The threads rebuilt from the session's transcript, for what happened before the mod loaded: each prompt,
- * then its tool calls, through the same steps as live. The transcript has no times, so no `sent` cell.
+ * then its tool calls, through the same steps as live. `times` (from the transcript file) gives each prompt its sent and res.
  */
-export function replay(msgs: SessionMessage[]): Observed {
+export function replay(msgs: SessionMessage[], times: PromptTime[] = []): Observed {
   const starts = msgs.flatMap((m, i) => (isPrompt(m) && !noticeOf(m.text) ? [i] : []))
   let o = emptyObserved
+  let k = 0
   for (const m of msgs.slice(starts.at(-REPLAY_PROMPTS) ?? 0)) {
     if (m.role === 'assistant') {
       for (const u of m.toolUses) o = observe(o, { ...u.input, tool: u.tool } as unknown as ToolCallInput, u as unknown as ToolCallResult)
@@ -363,9 +392,24 @@ export function replay(msgs: SessionMessage[]): Observed {
       const notice = noticeOf(m.text)
       // A new prompt means the turn before it ended with an answer.
       o = notice ? onNotice(o, notice) : onPrompt(onTurnEnd(o, true), m.text)
+      // The transcript file's stamps give the sent and res times the messages lack.
+      const i = notice ? -1 : timeOf(times, m.text, k)
+      if (i >= 0) {
+        k = i + 1
+        o = stamp(o, times[i]!.at, true)
+        if (times[i]!.res !== undefined) o = replied(o, times[i]!.res!)
+      }
     }
   }
   return o
+}
+
+/** The tail of this session's transcript file (the last 4 MB, the read limit), or '' when it cannot be read. */
+async function transcriptTail($: EngineInterface, cwd: string): Promise<string> {
+  // shortcut: assumes ~/.claude (no CLAUDE_CONFIG_DIR); read it if the band shows no times there.
+  const file = `${await $.env.get('HOME')}/.claude/projects/${cwd.replace(/[^A-Za-z0-9]/g, '-')}/${await $.session.id()}.jsonl`
+  const r = await $.process.run(['tail', '-c', '4000000', file], { timeoutMs: 5000 })
+  return r.exitCode === 0 ? r.stdout : ''
 }
 
 /** An Artifact publish (not a list, read or asset upload): its URL and title from the result. */
@@ -410,8 +454,8 @@ function body(els: Els, d: Data, act: Acts, cap: number, cols: number, off: numb
   const { Box } = els
   if (d.tab === 'summary') return summaryView(els, d.cache, cap, act, cols, d.now)
   if (d.tab === 'artifacts') return <Box flexDirection="column">{fit(els, artifactRows(els, d.arts, d.now, act, cols), cap, act, 'arts')}</Box>
-  // One timeline at the full width; ▲ ▼ move it under the pinned head, "+N more" shows every row.
-  return <Box flexDirection="column">{fit(els, threadWindow(els, d.o, cap === Infinity ? 0 : off), cap, act, 'threads')}</Box>
+  // One timeline at the full width; ▲ ▼ and the wheel move it under the pinned head, so nothing is cut.
+  return <Box flexDirection="column">{threadWindow(els, d.o, off, cols).slice(0, cap)}</Box>
 }
 
 /**
@@ -421,7 +465,7 @@ function body(els: Els, d: Data, act: Acts, cap: number, cols: number, off: numb
 function brief(els: Els, d: Data, act: Acts, cols: number, off: number, n: number): JSX.Element[] {
   const { Text } = els
   if (d.tab === 'artifacts') return artifactRows(els, d.arts, d.now, act, cols).slice(0, n)
-  if (d.tab === 'threads') return threadWindow(els, d.o, off).slice(0, n)
+  if (d.tab === 'threads') return threadWindow(els, d.o, off, cols).slice(0, n)
   const s = d.cache.summary
   if (!s) return [summaryView(els, d.cache, n, act, cols, d.now)]
   const names = (st: string) => s.tasks.filter(t => t.status === st).map(t => t.name)
@@ -448,29 +492,32 @@ function fit({ Text, Button }: Els, lines: JSX.Element[], n: number, act: Acts, 
 
 // ---- Threads tab: one timeline, each thread with its tasks and plan steps ----
 
-/** A thread's shown name: the on-device model's (checked again, so a fragment saved before 1.0.18 drops), else the title. */
-const nameOf = (t: Thread) => (t.name ? threadName(t.name) : undefined) ?? unlist(untag(t.title))
+/**
+ * A thread's shown name: its first prompt, cleaned of tags, links and paths. When that leaves nothing, the
+ * on-device model's name (checked again, so a fragment saved before 1.0.18 drops), else the title.
+ */
+const nameOf = (t: Thread) => promptLine(t.first ?? '') || ((t.name ? threadName(t.name) : undefined) ?? unlist(untag(t.title)))
 /** One glyph per thread state, the same in S, M and L: ▸ now, ✓ done, ✗ stuck, ⏸ paused. */
 const headGlyph = (o: Observed, t: Thread): [string, string?] =>
   t.id === o.current ? ['▸', 'suggestion'] : isOver(t) ? ['✓', 'success']
     : t.todos.some(d => d.status === 'blocked') ? ['✗', 'error'] : t.state === 'paused' ? ['⏸'] : ['▸']
 const plural = (n: number, s: string) => `${n} ${s}${n === 1 ? '' : 's'}`
 const rank = (o: Observed, t: Thread) => (t.id === o.current ? 0 : isOver(t) ? 2 : 1)
-/** The current thread first, then open ones, then finished ones; newest first in each group. */
-export const ordered = (o: Observed) => [...o.threads].reverse().sort((a, b) => rank(o, a) - rank(o, b))
+/** Like the chat: finished threads at the top, then open ones, the current one last; oldest first in each group. */
+export const ordered = (o: Observed) => [...o.threads].sort((a, b) => rank(o, b) - rank(o, a))
 const running = (t: Thread) => t.todos.find(d => d.status === 'in_progress')
 
-/** "sent 10:42", "1 commit", "3 files", "11 pass · 1 fail": the 4 right-hand columns of a thread's row, plain counts from its own log. */
+/** "11 pass · 1 fail", "sent 10:42", "res 10:49": the 3 right-hand columns of a thread's row, from its own log. */
 type Part = [string, string?]
 export function metaOf(o: Observed, t: Thread): Part[][] {
-  const mine = o.log.filter(a => a.thread === t.id)
-  const test = mine.findLast(a => a.kind === 'test')
+  const test = o.log.findLast(a => a.thread === t.id && a.kind === 'test')
   const m = test?.text.match(/(\d+) pass, (\d+) fail/)
   const tests: Part[] = !test ? []
     : m ? [[`${m[1]} pass`, 'success'], ...(+m[2]! ? [[' · '], [`${m[2]} fail`, 'error']] as Part[] : [])]
     : [] // no count read from the run: an empty cell, never a bare "tests pass"
-  const commits = mine.filter(a => a.kind === 'commit').length
-  return [t.sentAt === undefined ? [] : [[sentLabel(t.sentAt)]], commits ? [[plural(commits, 'commit')]] : [], t.files.length ? [[plural(t.files.length, 'file')]] : [], tests]
+  // res: when the reply to the latest prompt finished; empty while Claude still works on it.
+  const res = t.resAt !== undefined && (t.sentAt === undefined || t.resAt >= t.sentAt)
+  return [tests, t.sentAt === undefined ? [] : [[sentLabel(t.sentAt)]], res ? [[`res ${sentLabel(t.resAt!).slice(5)}`]] : []]
 }
 const lenOf = (c: Part[]) => c.reduce((a, [s]) => a + [...s].length, 0)
 /** The column separator: much fainter than dim, barely there on the dark background. */
@@ -481,16 +528,26 @@ const WORK: Partial<Record<Observed['log'][number]['kind'], [string, string?]>> 
   edit: ['✎'], test: ['✓', 'success'], commit: ['◆'], agent: ['↳'],
 }
 
+/** Text in at most 2 lines of `w` columns, broken at a word; the second line ends in "…" when more is left. */
+export function twoLines(s: string, w: number): [string, string?] {
+  const c = [...s]
+  if (c.length <= w) return [s]
+  const sp = c.slice(0, w + 1).lastIndexOf(' ')
+  const cut = sp > w / 2 ? sp : w
+  const rest = c.slice(cut).join('').trim()
+  return [c.slice(0, cut).join('').trimEnd(), [...rest].length > w ? [...rest].slice(0, w - 1).join('') + '…' : rest]
+}
+
 /** Indents: a thread at 0, its tasks and Claude's line at 2, plan steps at 4, nested steps 2 deeper each. */
 const IN = (n: number) => ' '.repeat(n)
 
 /**
- * One thread as rows, each its own line: the head (glyph, name, then the meta columns at `widths`), the later
- * prompts (`› <prompt> · 12:07`, the last 3, newest lowest), `❯ <activeForm>…` of the running task, every task
- * (or with no tasks, the last 3 things done: edits, test runs, commits, helpers), then the plan, folded to
- * "Plan · N steps" unless current. So a new prompt and new work always show near the head.
+ * One thread as rows, each its own line: the head (glyph, name, then the meta columns at `widths`), the plan
+ * (folded to "Plan · N steps" unless current), every task (or with no tasks, the last 3 things done: edits,
+ * test runs, commits, helpers), the later prompts (`› <prompt> · 12:07`, the last 3, up to 2 rows each), then
+ * `❯ <activeForm>…` of the running task. So the newest is lowest, in view when the band opens at the bottom.
  */
-function threadBlock(els: Els, o: Observed, t: Thread, widths: number[]): JSX.Element[] {
+function threadBlock(els: Els, o: Observed, t: Thread, widths: number[], cols: number): JSX.Element[] {
   const { Box, Text } = els
   const isNow = t.id === o.current
   const steps = (t.plan ?? []).filter(s => s.mark !== '#' && s.depth === 0).length
@@ -498,12 +555,15 @@ function threadBlock(els: Els, o: Observed, t: Thread, widths: number[]): JSX.El
   const meta = metaOf(o, t)
   const lead = (
     <Box flexDirection="row">
-      {/* The name takes every column up to the first meta column. */}
-      <Box flexGrow={1} flexShrink={1}>
+      {/* The name takes the columns left of the first meta cell and is cut there; it never pushes a cell. */}
+      <Box flexGrow={1} flexShrink={1} minWidth={0}>
         <Text wrap="truncate-end"><Text color={tone}>{g}</Text> <Text bold color={isNow ? 'suggestion' : undefined}>{nameOf(t)}</Text></Text>
       </Box>
+      {/* Each cell a fixed box that never shrinks, so "88 pass · 12 fail" never wraps and every ┊ lines up. */}
       {widths.map((w, i) => w > 0 && (
-        <Text><Text color={FAINT}>{' ┊ '}</Text>{' '.repeat(w - lenOf(meta[i]!))}{meta[i]!.map(([s, c]) => <Text color={c} dimColor={!c}>{s}</Text>)}</Text>
+        <Box width={w + 3} flexShrink={0}>
+          <Text wrap="truncate-end"><Text color={FAINT}>{' ┊ '}</Text>{' '.repeat(w - lenOf(meta[i]!))}{meta[i]!.map(([s, c]) => <Text color={c} dimColor={!c}>{s}</Text>)}</Text>
+        </Box>
       ))}
     </Box>
   )
@@ -525,37 +585,42 @@ function threadBlock(els: Els, o: Observed, t: Thread, widths: number[]): JSX.El
   ] : []
   const mine = o.log.filter(a => a.thread === t.id)
   const when = (at?: number) => (at === undefined ? '' : ` · ${sentLabel(at).slice(5)}`)
-  // The first prompt names the thread; each later one gets its own row.
-  const prompts = mine.filter(a => a.kind === 'prompt').slice(1).slice(-3).map(a => (
-    <Text wrap="truncate-end">{IN(2)}<Text dimColor>› </Text>{promptLine(a.text)}<Text dimColor>{when(a.at)}</Text></Text>
-  ))
+  // The first prompt names the thread; each later one gets up to 2 rows, cut at the end of the second.
+  const prompts = mine.filter(a => a.kind === 'prompt').slice(1).slice(-3).flatMap(a => {
+    const [one, two] = twoLines(promptLine(a.text), cols - 4 - when(a.at).length)
+    return [
+      <Text wrap="truncate-end">{IN(2)}<Text dimColor>› </Text>{one}{!two && <Text dimColor>{when(a.at)}</Text>}</Text>,
+      ...(two ? [<Text wrap="truncate-end">{IN(4)}{two}<Text dimColor>{when(a.at)}</Text></Text>] : []),
+    ]
+  })
   const work = tasks.length ? [] : mine.filter(a => WORK[a.kind]).slice(-3).map(a => {
     const bad = a.kind === 'test' && a.text.startsWith('tests fail')
     const [mark, color] = bad ? ['✗', 'error'] : WORK[a.kind]!
     const text = a.kind === 'test' ? a.text.replace(/^tests (pass|fail): /, '') : a.text.replace(/^(commit|helper): /, '')
     return <Text wrap="truncate-end">{IN(2)}<Text color={color} dimColor={!color}>{mark}</Text> <Text dimColor>{text}{when(a.at)}</Text></Text>
   })
+  // Oldest to newest, like the chat: what is live (the latest prompt, the running task) is the lowest row.
   return [
     lead,
-    ...prompts,
-    ...(run ? [<Text wrap="truncate-end">{IN(2)}<Text dimColor>❯ </Text><Text color="suggestion">{run.activeForm ?? run.text}…</Text></Text>] : []),
+    ...plan,
     ...tasks,
     ...work,
-    ...plan,
+    ...prompts,
+    ...(run ? [<Text wrap="truncate-end">{IN(2)}<Text dimColor>❯ </Text><Text color="suggestion">{run.activeForm ?? run.text}…</Text></Text>] : []),
   ]
 }
 
-/** Every thread newest first (the current one on top), each its head row then its own rows; `head[i]` is row i's thread head. */
-function timeline(els: Els, o: Observed): { rows: JSX.Element[]; head: number[] } {
+/** Every thread oldest first (the current one last), each its head row then its own rows; `head[i]` is row i's thread head. */
+function timeline(els: Els, o: Observed, cols: number): { rows: JSX.Element[]; head: number[] } {
   const threads = ordered(o)
   const metas = threads.map(t => metaOf(o, t))
   // Each column as wide as its longest cell, so the columns line up down the list; a column empty everywhere drops.
-  const widths = [0, 1, 2, 3].map(i => Math.max(0, ...metas.map(m => lenOf(m[i]!))))
+  const widths = [0, 1, 2].map(i => Math.max(0, ...metas.map(m => lenOf(m[i]!))))
   const rows: JSX.Element[] = []
   const head: number[] = []
   for (const t of threads) {
     const at = rows.length
-    for (const r of threadBlock(els, o, t, widths)) { rows.push(r); head.push(at) }
+    for (const r of threadBlock(els, o, t, widths, cols)) { rows.push(r); head.push(at) }
   }
   return { rows, head }
 }
@@ -564,8 +629,8 @@ function timeline(els: Els, o: Observed): { rows: JSX.Element[]; head: number[] 
 const roomOf = (len: number, n: number) => Math.max(0, len - n)
 
 /** The timeline from row `off`, the head of the thread that row is in pinned over it like a navbar. */
-function threadWindow(els: Els, o: Observed, off: number): JSX.Element[] {
-  const { rows, head } = timeline(els, o)
+function threadWindow(els: Els, o: Observed, off: number, cols: number): JSX.Element[] {
+  const { rows, head } = timeline(els, o, cols)
   if (!rows.length) return [<els.Text dimColor>Nothing yet.</els.Text>]
   // Row `off` is the window's top; its thread's head takes that row, so each ▼ moves the rows under it by one.
   return [rows[head[off] ?? 0]!, ...rows.slice(off + 1)]

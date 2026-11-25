@@ -14,6 +14,8 @@ export type Thread = {
   files: string[]
   /** The owner's last prompt to this thread, as typed (first 300 chars). */
   prompt?: string
+  /** The prompt that opened this thread (first 300 chars, one line): its shown name. */
+  first?: string
   /** A 3-6 word name the on-device model wrote from the first prompt; the title stands in without it. */
   name?: string
   /** The steps of the last plan Claude wrote for this thread (ExitPlanMode). */
@@ -23,6 +25,8 @@ export type Thread = {
   lastAt?: number
   /** When the owner last sent a prompt to this thread (ms), shown as "sent 10:42". */
   sentAt?: number
+  /** When Claude's reply to that prompt finished (ms), shown as "res 10:49"; absent while it works. */
+  resAt?: number
 }
 export type Activity = {
   kind: 'prompt' | 'return' | 'edit' | 'test' | 'error' | 'agent' | 'todo' | 'commit'
@@ -46,7 +50,7 @@ export type Summary = { percent: number; tasks: SummaryTask[]; blockers: string[
 /** startedAt: when the running Haiku call began (ms), for the progress bar. */
 export type SummaryCache = { key: string; summary?: Summary; error?: string; isLoading?: boolean; startedAt?: number }
 export type Tab = 'threads' | 'summary' | 'artifacts'
-/** The band: S one row (collapsed), M 4 body rows (compact), L opened up (expanded), or a single icon (min). all: "show all" grows the band to every row the engine gives. scroll: how many thread rows ▼ moved down under the pinned row. */
+/** The band: S one row (collapsed), M 4 body rows (compact), L opened up (expanded), or a single icon (min). all: "show all" grows the band to every row the engine gives. scroll: how many rows ▲ moved the timeline back from the newest (0: the newest in view). */
 export type Band = { mode: 'collapsed' | 'compact' | 'expanded' | 'min'; all?: boolean; scroll?: number }
 /** One Artifact this project published: first seen and last published, in ms since the epoch. */
 export type ArtifactRow = { url: string; title: string; created: number; modified: number }
