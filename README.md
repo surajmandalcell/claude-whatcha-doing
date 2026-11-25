@@ -26,11 +26,11 @@ is which. whatcha-doing shows, at a glance, what you asked each session, what it
 | ![Show all](docs/show-all.png) | |
 | **Show all.** A long list ends in "+N more". A click grows the band to show everything; `Show less` goes back. | |
 
-**Threads** shows the current thread with its tasks and plan steps, one row each, indented thread > task > step,
-then the earlier threads one row each, so you see what was said and done before.
-Each thread row ends with the time you sent its last prompt (`sent 10:42`), so you can find that prompt.
-Under each thread: what Claude is doing now (`❯`) and one results line (`11 tests pass  ·  1 fails  ·  3 files`).
-The right side shows the running task in detail. Plans from plan mode are parsed into steps. On a Mac with
+**Threads** is one timeline of every thread, newest first, the current one on top. Each thread shows its tasks
+and plan steps, one row each, indented thread > task > step, so you see what was said and done before.
+Each thread row ends in lined-up columns: tests (`11 tests pass · 1 fail`) | files | commits | the time you
+sent its last prompt (`sent 10:42`). Under each thread: what Claude is doing now (`❯`), then its tasks.
+▲ ▼ scroll the timeline; the top row always names the thread you are in. Plans from plan mode are parsed into steps. On a Mac with
 Apple Intelligence, the on-device model names each new thread in 3-6 words; it runs on your Mac, nothing is sent.
 
 ## Install
@@ -70,7 +70,7 @@ The band is driven with the mouse: click the tabs and buttons. Keys still go to 
 | `/whatcha open` or `/whatcha threads` | Open the Threads tab |
 | `/whatcha summary` | Open the Summary tab |
 | `/whatcha artifacts` | Open the Artifacts tab |
-| `/whatcha compact` | M: the current thread pinned, its 2 newest rows and the 2 previous threads; ▲ ▼ go further back |
+| `/whatcha compact` | M: 5 rows of the Threads timeline, the thread's name pinned on top; ▲ ▼ scroll |
 | `/whatcha all` | Show everything, no height limit |
 | `/whatcha close` | S: back to the one status row |
 | `/whatcha min` | Hide to `▴ @whatcha-doing` |
