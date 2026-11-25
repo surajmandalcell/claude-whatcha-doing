@@ -3,7 +3,7 @@ import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Regist
 
 import type { ArtifactRow, Artifacts, Band, Observed, Summary, SummaryCache, Tab, Thread, Todo } from '../types'
 import {
-  demoArtifacts, demoObserved, demoSummary, emptyObserved, hash, isTestCommand, onAgent, onArtifact, onCommit, onEdit,
+  demoArtifacts, demoObserved, demoSummary, sortSummary, touchTodos, emptyObserved, hash, isTestCommand, onAgent, onArtifact, onCommit, onEdit,
   dropEngineText, isEngineText, clearErrors, isQuietExit, noticeOf, promptLine, untag, onNotice, onError, onPlan, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, sentLabel, short, stamp, timeOf, transcriptTimes, type Times, unlist, testResult, SUMMARY_SYSTEM, summaryInput,
   summaryPrompt, SUMMARY_OUT, NAME_SYSTEM, threadName, SUM_SYSTEM, SUM_MIN, promptSum, setSum,
 } from './observe'
@@ -48,7 +48,7 @@ async function showSummary(io: SummaryIo, force = false) {
   if (!r.isAnswered) next = { key, error: `The estimate did not come back (${r.reason}). Press Refresh.` }
   else {
     try {
-      next = { key, summary: parseSummary(r.text) }
+      next = { key, summary: sortSummary(parseSummary(r.text), o) }
     } catch {
       next = { key, error: 'The estimate came back in a form we could not read. Press Refresh.' }
     }
@@ -186,7 +186,7 @@ export const register: Register = (on, options) => {
     const ran = await next(e)
     try {
       const at = await $.clock.now()
-      await update($, observed, o => stamp(observe(o, e, ran), at))
+      await update($, observed, o => stamp(touchTodos(o, observe(o, e, ran), at), at))
       const pub = published(e, ran)
       if (pub) {
         const a = await update($, artifacts, x => ({ ...x, rows: onArtifact(x.rows, pub.url, pub.title, at) }))

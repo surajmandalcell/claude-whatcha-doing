@@ -34,6 +34,7 @@ const T0 = 1_000 * HOUR
 // Nothing sits beneath the plugin: these hooks stand for the engine.
 function engine(on: On, toolText = (_: Record<string, unknown>) => 'ok', toolResult = (_: Record<string, unknown>): unknown => ({}), store: Record<string, unknown> = {}, lateMs = 0) {
   let calls = 0
+  let reply = SUMMARY
   let sent = ''
   let maxTokens = 0
   const clock = mock.clock(on, { now: T0 })
@@ -53,9 +54,9 @@ function engine(on: On, toolText = (_: Record<string, unknown>) => 'ok', toolRes
     calls++
     sent = (e.system ?? '') + e.prompt
     maxTokens = e.maxTokens ?? 0
-    return { value: { isAnswered: true, text: SUMMARY, usage: USAGE } }
+    return { value: { isAnswered: true, text: reply, usage: USAGE } }
   })
-  return { calls: () => calls, sent: () => sent, maxTokens: () => maxTokens, clock }
+  return { reply: (s: string) => { reply = s }, calls: () => calls, sent: () => sent, maxTokens: () => maxTokens, clock }
 }
 
 // The drawn tree as plain lines: one line per outer Text, a Button as [label].
@@ -913,4 +914,31 @@ test('Summary board: every column header shows; an empty one says so in one dim 
   expect(m.length).toBeLessThanOrEqual(6)
   expect(m[1]).toMatch(/^Done 0 +Active 1 +Stuck 0 +Left 1$/)
   expect(m[2]).toMatch(/^nothing finished yet +● Fix login +✓ nothing stuck +○ Write a test$/)
+})
+
+test('Summary board is a kanban: newest first in every column, whatever order Haiku gives; +N more cuts the oldest', async ($, on) => {
+  const m = engine(on, e => (e.tool === 'TaskCreate' ? 'ok' : 'ok'), e => (e.tool === 'TaskCreate' ? { task: { id: String(e.subject).at(-1) } } : {}))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'build the eight steps of the import', wait: false, origin: { kind: 'composer' } } as never)
+  // Eight tasks made a minute apart: step 1 the oldest, step 8 the newest.
+  for (let i = 1; i <= 8; i++) {
+    await m.clock.advance(60_000)
+    await $.tool.call({ tool: 'TaskCreate', subject: `Import step ${i}`, description: '' } as never)
+  }
+  // Haiku lists them oldest first; the band sorts by the times it holds.
+  m.reply(JSON.stringify({ p: 10, t: Array.from({ length: 8 }, (_, i) => [`Step ${i + 1}`, 'r', `Do import step ${i + 1}.`, `#1.${i + 1}`]), b: [] }))
+  const ui = await $.ui.mount(BAND(50, 150))
+  await ui.press({ key: 'tab-summary' })
+  const left = screen(bodyOf(await ui.drawn()), 145).map(l => l.slice(111).trim()).filter(Boolean)
+  expect(left.slice(0, 3)).toEqual(['Left 8', '○ Step 8', '○ Step 7'])
+  await ui.press({ key: 'size-compact' })
+  const mRows = screen(bodyOf(await ui.drawn()), 145)
+  expect(mRows.map(l => l.slice(111).trim())).toEqual(['', 'Left 8', '○ Step 8', '○ Step 7', '+6 more', ''])
+  // A later change moves a task to the top: step 2 is updated now.
+  await m.clock.advance(60_000)
+  await $.tool.call({ tool: 'TaskUpdate', taskId: '2', status: 'in_progress' } as never)
+  m.reply(JSON.stringify({ p: 10, t: Array.from({ length: 8 }, (_, i) => [`Step ${i + 1}`, 'r', '', `#1.${i + 1}`]), b: [] }))
+  await ui.press({ key: 'refresh' })
+  expect(screen(bodyOf(await ui.drawn()), 145).map(l => l.slice(111).trim())[2]).toBe('○ Step 2')
+  await ui.unmount()
 })

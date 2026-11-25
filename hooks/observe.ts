@@ -1,6 +1,6 @@
 // Pure state changes from hooks, the demo fixture, and the Summary request.
 // No model calls here: the pane's passive tabs come only from these.
-import type { ArtifactRow, Observed, PlanStep, Summary, Thread, Todo } from '../types'
+import type { ArtifactRow, Observed, PlanStep, Summary, SummaryTask, Thread, Todo } from '../types'
 
 export const emptyObserved: Observed = { threads: [], current: 0, log: [] }
 
@@ -367,7 +367,7 @@ export function summaryInput(o: Observed): string {
     const commits = o.log.filter(a => a.thread === t.id && a.kind === 'commit').length
     const counts = [t.files.length && `${t.files.length} files`, commits && `${commits} commits`].filter(Boolean).join(', ')
     const head = `#${t.id}${t.parent ? `<${t.parent}` : ''} ${short(t.title, 40)} [${t.state}]${counts ? ` ${counts}` : ''}`
-    const todos = t.todos.slice(0, Math.max(0, room)).map(d => ` ${TODO_WORD[d.status] ?? d.status}: ${short(d.text, 40)}`)
+    const todos = t.todos.slice(0, Math.max(0, room)).map((d, i) => ` #${t.id}.${i + 1} ${TODO_WORD[d.status] ?? d.status}: ${short(d.text, 40)}`)
     room -= todos.length
     return [head, ...todos]
   })
@@ -387,8 +387,8 @@ export const SUMMARY_SYSTEM = 'Summarize a coding session in very simple English
 export const summaryPrompt = (input: string) =>
   `Threads (#id<parent = side trip; done/answered are finished):\n${input}\n\n` +
   'Reply JSON only. p: percent done. t: max 8 tasks as [name 2-4 words, status d=done a=active b=stuck r=left, ' +
-  'plain line of at most 8 words]. b: why stuck, at most 12 words.\n' +
-  '{"p":0,"t":[["","d",""]],"b":[""]}'
+  'plain line of at most 8 words, the #id it comes from]. b: why stuck, at most 12 words.\n' +
+  '{"p":0,"t":[["","d","","#1.1"]],"b":[""]}'
 
 const STATUS: Record<string, Summary['tasks'][number]['status']> = { d: 'completed', a: 'active', b: 'blocked', r: 'remaining' }
 /** Parses the short JSON (tasks as [name, status, line]) and checks it; throws a plain message when it does not fit. */
@@ -398,7 +398,7 @@ export function parseSummary(text: string): Summary {
     typeof v.p === 'number' && Array.isArray(v.t) && Array.isArray(v.b) &&
     v.t.every(t => Array.isArray(t) && typeof t[0] === 'string' && (t[1] ?? '') in STATUS)
   if (!ok) throw new Error('The summary came back in the wrong shape.')
-  const tasks = v.t.map(([n, s, e]) => ({ name: n!, status: STATUS[s!]!, eli5: e ?? '' }))
+  const tasks = v.t.map(([n, s, e, r]) => ({ name: n!, status: STATUS[s!]!, eli5: e ?? '', ...(typeof r === 'string' && /^#\d/.test(r) ? { ref: r } : {}) }))
   return {
     percent: Math.max(0, Math.min(100, Math.round(v.p))),
     tasks,
@@ -510,10 +510,36 @@ export const demoArtifacts = (now: number): ArtifactRow[] =>
   ].sort((a, b) => b.modified - a.modified)
 
 /** Haiku's real reply (claude-haiku-5-5, 2026-11-24) to summaryPrompt(summaryInput(demoObserved)): 501 chars of JSON. */
+/**
+ * The board is a kanban: newest first in each column, whatever order Haiku gave. A task sorts by its todo's last
+ * change, else its thread's last time, else the newer thread and later todo first; a task with no known #id goes last.
+ */
+export function sortSummary(s: Summary, o: Observed): Summary {
+  const when = (t: SummaryTask): number[] => {
+    const m = t.ref?.match(/^#(\d+)(?:\.(\d+))?/)
+    const th = m ? o.threads.find(x => x.id === Number(m[1])) : undefined
+    if (!th) return [-1, -1, -1]
+    const i = m![2] ? Number(m![2]) - 1 : -1
+    return [th.todos[i]?.at ?? th.lastAt ?? 0, th.id, i]
+  }
+  const tasks = s.tasks.map(t => [t, when(t)] as const).sort(([, a], [, b]) => b[0]! - a[0]! || b[1]! - a[1]! || b[2]! - a[2]!).map(([t]) => t)
+  return { ...s, tasks, remaining: tasks.filter(t => t.status === 'remaining').map(t => t.name) }
+}
+
+/** Stamps `at` on each todo this event added or changed (status or text); the rest keep their time. */
+export function touchTodos(prev: Observed, next: Observed, at: number): Observed {
+  const old = new Map(prev.threads.flatMap(t => t.todos.map(d => [`${t.id}|${d.id ?? d.text}`, d] as const)))
+  const touch = (id: number, d: Todo): Todo => {
+    const was = old.get(`${id}|${d.id ?? d.text}`)
+    return was && was.status === d.status && was.text === d.text ? (d.at === was.at ? d : { ...d, at: was.at }) : { ...d, at }
+  }
+  return { ...next, threads: next.threads.map(t => ({ ...t, todos: t.todos.map(d => touch(t.id, d)) })) }
+}
+
 export const DEMO_REPLY =
-  '{"p":29,"t":[["Round tax per line","d","Tax now rounds to the cent per line."],["Fix tax tests","r","Two tax tests still fail; paused."],' +
-  '["Update receipt snapshot","b","Waiting on the one-cent receipt fix."],["Use Node 22","d","CI now runs on Node 22."],' +
-  '["Add tax column","a","Adding a tax column to CartTable now."],["Format with formatMoney","r","Format the new tax column."],' +
-  '["Add cart table test","r","Write a test for the cart table."]],' +
+  '{"p":29,"t":[["Round tax per line","d","Tax now rounds to the cent per line.","#1.1"],["Fix tax tests","r","Two tax tests still fail; paused.","#1.2"],' +
+  '["Update receipt snapshot","b","Waiting on the one-cent receipt fix.","#1.3"],["Use Node 22","d","CI now runs on Node 22.","#3.1"],' +
+  '["Add tax column","a","Adding a tax column to CartTable now.","#4.1"],["Format with formatMoney","r","Format the new tax column.","#4.2"],' +
+  '["Add cart table test","r","Write a test for the cart table.","#4.3"]],' +
   '"b":["Receipt total is off by 1 cent in receipt.test.ts."]}'
-export const demoSummary: Summary = parseSummary(DEMO_REPLY)
+export const demoSummary: Summary = sortSummary(parseSummary(DEMO_REPLY), demoObserved(0))

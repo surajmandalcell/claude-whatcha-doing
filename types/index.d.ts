@@ -1,6 +1,6 @@
 export type TodoStatus = 'pending' | 'in_progress' | 'completed' | 'blocked'
-/** activeForm: Claude's "Building X" line while the task runs; description: what TaskCreate said to do. */
-export type Todo = { text: string; status: TodoStatus; id?: string; activeForm?: string; description?: string }
+/** activeForm: Claude's "Building X" line while the task runs; description: what TaskCreate said to do. at: when it last changed (ms). */
+export type Todo = { text: string; status: TodoStatus; id?: string; activeForm?: string; description?: string; at?: number }
 /** One plan line: a section heading (mark "#"), or an item ("1.", "·") at its nesting depth from 0. */
 export type PlanStep = { text: string; depth: number; mark: string }
 export type Thread = {
@@ -47,6 +47,8 @@ export type SummaryTask = {
   name: string
   status: 'completed' | 'active' | 'blocked' | 'remaining'
   eli5: string
+  /** Where Haiku took it from: "#3" a thread, "#3.2" its 2nd todo. Sorts the board newest first. */
+  ref?: string
 }
 export type Summary = { percent: number; tasks: SummaryTask[]; blockers: string[]; remaining: string[] }
 /** startedAt: when the running Haiku call began (ms), for the progress bar. */
