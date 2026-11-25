@@ -19,9 +19,15 @@ const artifacts = atom({ plugin: 'whatcha-doing', key: 'artifacts' } as const, {
 const PROMPT_ROWS = 4
 // The least body rows: enough for the Summary head, the updating bar and a few board rows.
 const MIN_BODY = 6
-/** Body rows: 30% of a tall terminal (40+ rows); a short one may give up to 90%, less the prompt. */
-export const bodyCap = (rows: number) => Math.max(MIN_BODY, rows >= 40 ? Math.floor(rows * 0.3) : Math.floor(rows * 0.9) - PROMPT_ROWS)
+/**
+ * Regular body rows: 55% of a tall terminal (40+ rows); a short one may give up to 90%, less the prompt.
+ * The engine caps the band at half the terminal (maxRows), so the prompt always stays on screen.
+ */
+export const bodyCap = (rows: number) => Math.max(MIN_BODY, rows >= 40 ? Math.floor(rows * 0.55) : Math.floor(rows * 0.9) - PROMPT_ROWS)
+/** Compact body rows: the few most useful lines of the shown tab. */
+export const COMPACT_ROWS = 3
 const TABS: [Tab, string][] = [['threads', 'Threads'], ['summary', 'Summary'], ['artifacts', 'Artifacts']]
+const SIZES: [Band['mode'], string][] = [['collapsed', 'Minimize'], ['compact', 'Compact'], ['expanded', 'Regular']]
 
 // A hook may not pass `$` on, so each hook spells these closures itself.
 type SummaryIo = {
@@ -82,8 +88,8 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'whatcha',
-      description: 'Open the Whatcha doing band (threads, summary, artifacts, all, close, min, demo, live)',
-      argumentHint: '[open|threads|summary|artifacts|all|close|min|demo|live]',
+      description: 'Open the Whatcha doing band (threads, summary, artifacts, compact, all, close, min, demo, live)',
+      argumentHint: '[open|threads|summary|artifacts|compact|all|close|min|demo|live]',
     })
     if ((await $.env.get('WHATCHA_DEMO')) === '1') await update($, demo, () => true)
     await update($, observed, dropEngineText).catch(() => {})
@@ -109,7 +115,7 @@ export const register: Register = on => {
     else if (arg === 'all') await update($, band, (x): Band => ({ ...x, mode: 'expanded', all: !x.all }))
     else {
       if (tab) await update($, tabAtom, () => tab)
-      await update($, band, (x): Band => ({ ...x, mode: 'expanded', all: false }))
+      await update($, band, (x): Band => ({ ...x, mode: arg === 'compact' ? 'compact' : 'expanded', all: false }))
       if ((await read($, tabAtom)) === 'summary') await showSummary(io)
     }
     // The band itself shows the result: an output line per command only stacked noise above it.
@@ -132,7 +138,7 @@ export const register: Register = on => {
     if (!e.agentId) await update($, observed, o => onTurnEnd(o, e.reason === 'answer')).catch(() => {})
     const r = await next(e)
     // An open Summary tab follows the work: re-ask Haiku once per turn, only when the threads changed (the key dedups).
-    if (!e.agentId && (await read($, tabAtom)) === 'summary' && (await read($, band)).mode === 'expanded') {
+    if (!e.agentId && (await read($, tabAtom)) === 'summary' && ['compact', 'expanded'].includes((await read($, band)).mode)) {
       void showSummary({
         state: async () => [await read($, demo), await read($, observed), await read($, summary)],
         set: c => update($, summary, () => c),
@@ -185,7 +191,8 @@ export const register: Register = on => {
     const setMode = (mode: Band['mode']) => update($, band, (x): Band => ({ ...x, mode, all: false }))
     const open = async (t: Tab) => {
       await update($, tabAtom, () => t)
-      await update($, band, (x): Band => ({ ...x, mode: 'expanded', all: false }))
+      // A tab keeps a Compact band compact; from the one row it opens to Regular.
+      await update($, band, (x): Band => ({ ...x, mode: x.mode === 'compact' ? 'compact' : 'expanded', all: false }))
       if (t === 'summary') await showSummary(io)
     }
     const showAll = (all: boolean) => update($, band, (x): Band => ({ ...x, all }))
@@ -208,7 +215,7 @@ export const register: Register = on => {
     const pct = cache.summary?.percent
     const now = byId(o, o.current)
     const over = o.threads.filter(isOver).length
-    const isOpen = b.mode === 'expanded'
+    const isOpen = b.mode === 'expanded' || b.mode === 'compact'
     // Under 120 columns the buttons do not fit beside the status: they take a row of their own.
     const isNarrow = cols < 120
     const status = (
@@ -229,7 +236,12 @@ export const register: Register = on => {
         ))}
         {isOpen && tab === 'summary' && <Button key="refresh" plain label="Refresh" onPress={() => showSummary(io, true)} />}
         {isOpen && b.all && <Button key="less" plain label="Show less" onPress={() => showAll(false)} />}
-        {isOpen && <Button key="compact" plain label="Compact" onPress={() => setMode('collapsed')} />}
+        {/* The three sizes, the shown one bold in the accent color like a tab. */}
+        {SIZES.map(([mode, label]) => (
+          <Button key={`size-${mode}`} label={label} plain onPress={() => setMode(mode)}>
+            {b.mode === mode ? <Text bold color="suggestion">{label}</Text> : label}
+          </Button>
+        ))}
         {/* Not "[-]": the engine draws its own [-] right after, which hides the band fully. */}
         <Button key="min" plain label="▾" onPress={() => setMode('min')} />
       </Box>
@@ -250,7 +262,8 @@ export const register: Register = on => {
     const cap = b.all ? Infinity : Math.max(3, Math.min(bodyCap(e.viewport?.rows ?? 50), e.props.maxRows - (isNarrow ? 3 : 2)))
     // Push, not overlay: an absolute Box with a negative top is clipped to the band, so it cannot paint over the chat.
     const rule = <Text dimColor wrap="truncate-end">{'─'.repeat(cols)}</Text>
-    return stack(<Box flexDirection="column" width={width}>{row}{rule}{body(els, d, act, cap, cols)}</Box>)
+    const main = b.mode === 'compact' ? <Box flexDirection="column">{brief(els, d, act, cols)}</Box> : body(els, d, act, cap, cols)
+    return stack(<Box flexDirection="column" width={width}>{row}{rule}{main}</Box>)
   }).catch(($, e, next) => next(e))
 
   // Escape hands the keys back and the ring leaves our band: show all goes back to normal.
@@ -351,6 +364,35 @@ function body(els: Els, d: Data, act: Acts, cap: number, cols: number): JSX.Elem
   )
 }
 const DIV_GAP = 2
+
+/**
+ * The Compact body: the shown tab's most useful COMPACT_ROWS lines. Threads: the newest graph rows.
+ * Summary: the head (or the updating bar), what is active or stuck, and the work left. Artifacts: the newest one.
+ */
+function brief(els: Els, d: Data, act: Acts, cols: number): JSX.Element[] {
+  const { Text } = els
+  if (d.tab === 'artifacts') return artifactRows(els, d.arts, d.now, act, cols).slice(0, COMPACT_ROWS)
+  if (d.tab === 'threads') {
+    const rows = graphRows(d.o).slice(-COMPACT_ROWS).map(r => graphLine(els, r))
+    return rows.length ? rows : [<Text dimColor>Nothing yet.</Text>]
+  }
+  const s = d.cache.summary
+  if (!s) return [summaryView(els, d.cache, COMPACT_ROWS, act, cols, d.now)]
+  const names = (st: string) => s.tasks.filter(t => t.status === st).map(t => t.name)
+  const stuck = names('blocked')
+  return [
+    <Text wrap="truncate-end">
+      <Text bold>~{s.percent}% done</Text> <Text color="suggestion">{meter(s.percent, 10)}</Text><Text dimColor>  Haiku's estimate</Text>
+    </Text>,
+    d.cache.isLoading ? updatingBar(els, d.cache, cols, d.now) : (
+      <Text wrap="truncate-end">
+        <Text color="suggestion">●</Text> Active: {names('active').join('  ·  ') || 'nothing'}
+        {stuck.length > 0 && <Text color="error">  ✗ Stuck: {stuck.join('  ·  ')}</Text>}
+      </Text>
+    ),
+    <Text dimColor wrap="truncate-end">Work left: {s.remaining.join('  ·  ') || 'nothing'}</Text>,
+  ]
+}
 
 /** At most n rows; the last one says how many were cut, and a press shows them all. */
 function fit({ Text, Button }: Els, lines: JSX.Element[], n: number, act: Acts, key: string): JSX.Element[] {
@@ -464,15 +506,18 @@ function timeline(els: Els, o: Observed, cap: number, act: Acts): JSX.Element[] 
       ? <Button key="earlier" plain dimColor label={`${'╷ '.repeat(first)}earlier · show less`} onPress={act.less} />
       : <Text dimColor wrap="truncate-end">{'╷ '.repeat(first)}earlier</Text>
   const nowEnd = <Text wrap="truncate-end"><Text dimColor>{'╵ '.repeat(last)}</Text><Text color="suggestion" bold>now</Text></Text>
-  const lines = rows.map(r => (
+  return [earlier, ...rows.map(r => graphLine(els, r)), nowEnd]
+}
+
+function graphLine({ Text }: Els, r: GraphRow): JSX.Element {
+  return (
     <Text wrap="truncate-end">
       <Text dimColor>{r.rail}</Text>
       {r.mark && <Text color={r.tone}>{r.mark} </Text>}
       {r.text && <Text bold={r.strong} color={r.strong ? 'suggestion' : undefined} dimColor={r.dim}>{r.text}</Text>}
       {r.note && <Text dimColor>  {r.note}</Text>}
     </Text>
-  ))
-  return [earlier, ...lines, nowEnd]
+  )
 }
 
 // ---- right of the graph: every thread in the owner's own words ----

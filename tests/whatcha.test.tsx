@@ -81,7 +81,7 @@ test('band: one status row collapsed; Threads shows the git graph and every thre
   const m = engine(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.command.run(whatcha('demo'))
-  const ui = await $.ui.mount(BAND())
+  const ui = await $.ui.mount(BAND(22)) // 22 rows: a 15-row body, so the lists cut
   const row = flat(await ui.drawn())
   expect(row).toContain('now: Show tax on each cart line')
   expect(row).toContain('2/4 threads done')
@@ -121,7 +121,7 @@ test('band: one status row collapsed; Threads shows the git graph and every thre
   await ui.unmount()
 })
 
-test('minimize leaves an icon, and pressing it brings the row back', async ($, on) => {
+test('▾ hides the band to an icon, and pressing it brings the row back', async ($, on) => {
   engine(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.command.run(whatcha('demo'))
@@ -134,9 +134,9 @@ test('minimize leaves an icon, and pressing it brings the row back', async ($, o
   await ui.unmount()
 })
 
-test('height: 30% of a tall terminal; a press on a cut end grows the band to show all, and again shows less', async ($, on) => {
-  expect(bodyCap(50)).toBe(15)
-  expect(bodyCap(100)).toBe(30)
+test('height: Regular takes 55% of a tall terminal; a press on a cut end grows the band to show all, and again shows less', async ($, on) => {
+  expect(bodyCap(50)).toBe(27)
+  expect(bodyCap(100)).toBe(55)
   expect(bodyCap(20)).toBe(14)
   engine(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -159,6 +159,40 @@ test('height: 30% of a tall terminal; a press on a cut end grows the band to sho
   expect(flat(await ui.drawn())).toContain('[Show less]')
   await ui.press({ key: 'earlier' })
   expect(columns(await ui.drawn())[0]!.length).toBe(6) // the same row again: back to normal
+  await ui.unmount()
+})
+
+test('sizes: Minimize is the one row, Compact the 3 most useful lines of the tab, Regular up to 55%', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.command.run(whatcha('demo'))
+  const ui = await $.ui.mount(BAND())
+  const band = async () => (await ui.drawn() as unknown as N).children[0]!
+  const rows = async () => ((await band()).children[2]!.children as unknown as R[]).map(rowText)
+  expect(flat(await band())).toMatch(/\[Minimize\]\n\[Compact\]\n\[Regular\]\n\[▾\]/)
+  await ui.press({ key: 'size-compact' })
+  const threads = await rows()
+  expect(threads).toHaveLength(3)
+  expect(threads.at(-1)).toBe('│ ○ Add a cart table test') // the newest graph rows: where the work is now
+  await ui.press({ key: 'tab-summary' }) // a tab keeps the band compact
+  expect(await rows()).toEqual([
+    "~29% done ▰▰▰▱▱▱▱▱▱▱  Haiku's estimate",
+    expect.stringMatching(/^● Active: .+  ✗ Stuck: /),
+    expect.stringMatching(/^Work left: /),
+  ])
+  await ui.press({ key: 'tab-artifacts' })
+  const arts = await rows()
+  expect(arts).toHaveLength(3)
+  expect(arts[0]).toMatch(/Artifacts  ·  click copies the link\s+Created  Modified$/)
+  await ui.press({ key: 'size-expanded' })
+  await ui.press({ key: 'tab-threads' })
+  const [graph] = columns(await ui.drawn())
+  expect(graph!.length).toBeGreaterThan(3)
+  expect(graph!.length).toBeLessThanOrEqual(27)
+  await ui.press({ key: 'size-collapsed' })
+  expect(flat(await band())).not.toContain('───') // the status row alone: no rule, no body
+  await $.command.run(whatcha('compact'))
+  expect(await rows()).toHaveLength(3)
   await ui.unmount()
 })
 

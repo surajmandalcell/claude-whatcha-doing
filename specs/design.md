@@ -9,15 +9,19 @@ errors, never generic labels.
 All looks are settled. Nothing is open.
 
 - **Place**: a band above the prompt, no sidebar or side pane.
-- **Height**: on 40 or more rows, the body takes up to 30% of the rows. On a shorter terminal it may take
-  up to 90% less the prompt, but Claude Code caps the band (`maxRows` = 18 at 160x50).
+- **Sizes**: header buttons `Minimize` (the one status row), `Compact` (3 body lines: Threads the newest
+  graph rows, Summary the head or updating bar, Active and Stuck, and Work left, Artifacts the newest one),
+  `Regular` (the full body). The shown size is bold in the accent color. A tab keeps Compact; from the one
+  row it opens Regular. `/whatcha compact` opens Compact.
+- **Height**: Regular's body takes at least 6 rows, and on 40 or more rows up to 55%. On a shorter terminal
+  it may take up to 90% less the prompt, but Claude Code caps the band at half the terminal (`maxRows`).
 - **Show all**: a cut list ends in "earlier · N more" (timeline) or "+N more" (lists). A click, or
   `/whatcha all`, grows the band to every row Claude Code gives it; the engine scrolls the rest. The
-  earlier row (now "earlier · show less"), `Show less`, `Compact`, a tab, or the ring leaving the band
+  earlier row (now "earlier · show less"), `Show less`, a size button, a tab, or the ring leaving the band
   goes back.
-- **Collapsed row**: `● now: <thread>  ·  X/N threads done  ·  ~45% ▰▰▱▱▱`, with the tabs, `Compact`
+- **Collapsed row**: `● now: <thread>  ·  X/N threads done  ·  ~45% ▰▰▱▱▱`, with the tabs, the three sizes
   and `▾` on the right. Under 120 columns the buttons take a second row.
-- **Minimized**: `▾` shrinks the band to one right-aligned button, `▴ @whatcha-doing`.
+- **Hidden**: `▾` shrinks the band to one right-aligned button, `▴ @whatcha-doing`.
 - **Tabs**: Threads · Summary · Artifacts, clicked. The band never shows key labels or "press x" text:
   keys go to the prompt box, and the band almost never has focus.
 - **Threads tab, left**: a git graph, newest at the bottom next to the prompt. Reads like
@@ -33,7 +37,7 @@ All looks are settled. Nothing is open.
   3. dim `⏺ <file names> · tests 41/42 · helper: <what> · commit: <message>`;
   4. the last failure on its own red line, `✗ 1 snapshot failed in Settings.test.tsx`.
   Lines 2-4 sit at the title's left edge, may run under Tasks, and are cut before the time columns. The
-  current thread opens with its tasks one step in. No blank line between threads: the 30% cap has no
+  current thread opens with its tasks one step in. No blank line between threads: the height cap has no
   room for it.
 - **Summary tab**: Haiku's estimate, marked as an estimate (`~38% done ▰▰▰▰▱▱▱▱▱▱ estimate: Haiku's
   guess…`), then a board of Done, Active, Stuck, Left, each task with one plain line, blockers in red,
