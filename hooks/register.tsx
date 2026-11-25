@@ -231,8 +231,8 @@ export const register: Register = on => {
     const cap = b.all ? Infinity : Math.max(3, Math.min(bodyCap(e.viewport?.rows ?? 50), e.props.maxRows - (isNarrow ? 3 : 2)))
     // How far ▼ can move the thread rows under the pinned row: M always, L only when the list is cut.
     const room = !isOpen || tab !== 'threads' || b.all ? 0
-      : b.mode === 'compact' ? (now ? Math.max(0, threadBlock(els, o, now).sub.length - (COMPACT_ROWS - 1)) : 0)
-      : Math.max(0, threadList(els, d, cols).length - cap)
+      : b.mode === 'compact' ? Math.max(0, o.threads.length - 1 - 2)
+      : Math.max(0, threadList(els, d, cols, cap).length - cap)
     const off = Math.min(b.scroll ?? 0, room)
     const scrollTo = (n: number) => update($, band, (x): Band => ({ ...x, scroll: n }))
     // 3 columns wide like the sizes; an arrow that cannot move stays in place, dim, so nothing shifts.
@@ -375,7 +375,7 @@ function body(els: Els, d: Data, act: Acts, cap: number, cols: number, off: numb
   if (d.tab === 'summary') return summaryView(els, d.cache, cap, act, cols, d.now)
   if (d.tab === 'artifacts') return <Box flexDirection="column">{fit(els, artifactRows(els, d.arts, d.now, act, cols), cap, act, 'arts')}</Box>
   // The first row (the current thread) stays pinned; ▲ ▼ move the rest under it.
-  const all = threadList(els, d, cols)
+  const all = threadList(els, d, cols, cap)
   const shown = fit(els, [all[0]!, ...all.slice(1 + off)], cap, act, 'threads')
   if (cols < 100) return <Box flexDirection="column">{shown}</Box>
   // [threads | faint divider | running task]; the divider is as tall as the taller side.
@@ -395,9 +395,10 @@ function body(els: Els, d: Data, act: Acts, cap: number, cols: number, off: numb
 const DIV_GAP = 2
 
 /** The Threads tab's scrolling list; under 100 columns the running task goes under the threads, full width. */
-function threadList(els: Els, d: Data, cols: number): JSX.Element[] {
+function threadList(els: Els, d: Data, cols: number, cap: number): JSX.Element[] {
   const { Text } = els
-  const rows = threadRows(els, d.o)
+  // Show all draws every thread in full; a capped L leaves room for the earlier threads.
+  const rows = cap === Infinity ? threadRows(els, d.o) : cappedRows(els, d.o, cap)
   if (!rows.length) return [<Text dimColor>Nothing yet.</Text>]
   return cols < 100 ? [...rows, <Text> </Text>, ...taskDetail(els, d.o, cols)] : rows
 }
@@ -410,11 +411,12 @@ function brief(els: Els, d: Data, act: Acts, cols: number, off: number): JSX.Ele
   const { Text } = els
   if (d.tab === 'artifacts') return artifactRows(els, d.arts, d.now, act, cols).slice(0, COMPACT_ROWS)
   if (d.tab === 'threads') {
-    // The current thread's head stays pinned on top, full width; its sub rows scroll under it as work moves on.
-    const t = byId(d.o, d.o.current)
+    // The current thread's head pinned on top, its 2 newest rows, then earlier threads one dim row each; ▲ ▼ go back.
+    const [t, ...earlier] = ordered(d.o)
     if (!t) return [<Text dimColor>Nothing yet.</Text>]
     const b = threadBlock(els, d.o, t)
-    return [b.lead, ...b.sub.slice(off, off + COMPACT_ROWS - 1)]
+    const back = Math.min(2, earlier.length)
+    return [b.lead, ...b.sub.slice(0, COMPACT_ROWS - 1 - back), ...earlier.slice(off, off + back).map(x => threadLine(els, d.o, x, true))]
   }
   const s = d.cache.summary
   if (!s) return [summaryView(els, d.cache, COMPACT_ROWS, act, cols, d.now)]
@@ -479,7 +481,7 @@ const IN = (n: number) => ' '.repeat(n)
  * `❯ <activeForm>…` of the running task, the results line, then every task, then the plan's steps.
  * `lead` is the head; `sub` are the rest, the running task's lines first (M shows the first 3).
  */
-function threadBlock(els: Els, o: Observed, t: Thread): { lead: JSX.Element; sub: JSX.Element[]; items: JSX.Element[] } {
+function threadBlock(els: Els, o: Observed, t: Thread): { lead: JSX.Element; sub: JSX.Element[]; items: JSX.Element[]; short: JSX.Element[] } {
   const { Box, Text } = els
   const isNow = t.id === o.current
   const n = t.todos.length
@@ -524,7 +526,40 @@ function threadBlock(els: Els, o: Observed, t: Thread): { lead: JSX.Element; sub
   ] : []
   // M scrolls from the running task: the done ones above it are history.
   const from = Math.max(0, t.todos.findIndex(d => d.status !== 'completed'))
-  return { lead, sub: [...lines, ...tasks.slice(from), ...plan], items: [...lines, ...tasks, ...plan] }
+  // When the plan does not fit, L keeps only its "Plan · N steps" row (plan[0]).
+  return { lead, sub: [...lines, ...tasks.slice(from), ...plan], items: [...lines, ...tasks, ...plan], short: [...lines, ...tasks.slice(from), ...plan.slice(0, 1)] }
+}
+
+/** An earlier thread on one row: glyph (its state), name, then its result counts and the time sent at the right edge. */
+function threadLine(els: Els, o: Observed, t: Thread, dim = false): JSX.Element {
+  const { Box, Text } = els
+  const [g, tone] = headGlyph(o, t)
+  const right = [...resultParts(o, t).map(([s]) => s), t.sentAt === undefined ? '' : sentLabel(t.sentAt)].filter(Boolean).join('  ·  ')
+  return (
+    <Box flexDirection="row" gap={2}>
+      <Box flexShrink={1}>
+        <Text wrap="truncate-end" dimColor={dim}>
+          <Text color={tone} dimColor={dim}>{g}</Text> <Text bold={!dim}>{nameOf(t)}</Text>
+        </Text>
+      </Box>
+      <Box flexGrow={1} />
+      <Text dimColor>{right}</Text>
+    </Box>
+  )
+}
+
+/**
+ * L's thread list with a height cap: the current thread takes at most 60% of the rows (its plan folds to
+ * "Plan · N steps" when it does not fit), then every earlier thread on one row, newest first.
+ */
+function cappedRows(els: Els, o: Observed, cap: number): JSX.Element[] {
+  const { Text } = els
+  const [now, ...earlier] = ordered(o)
+  if (!now) return []
+  const b = threadBlock(els, o, now)
+  const budget = Math.max(2, Math.floor(cap * 0.6))
+  const mine = 1 + b.items.length <= budget ? [b.lead, ...b.items] : [b.lead, ...b.short].slice(0, budget)
+  return earlier.length ? [...mine, <Text> </Text>, ...earlier.map(t => threadLine(els, o, t))] : mine
 }
 
 /** Every thread's rows, a blank row between threads. */

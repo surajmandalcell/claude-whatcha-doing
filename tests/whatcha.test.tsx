@@ -126,11 +126,24 @@ test('band: one status row; Threads shows each thread with its tasks and plan, o
   expect(row).toContain('[Artifacts]')
   expect(row).not.toMatch(/\b[tsa]: |Enter|press /) // keys go to the prompt: no key labels
   await ui.press({ key: 'tab-threads' })
-  const [left, right, divider] = columns(await ui.drawn())
-  expect(left).toHaveLength(22)
-  expect(left!.at(-1)).toMatch(/^\+\d+ more$/)
-  expect(divider).toEqual(Array(22).fill('│')) // the divider spans every row
-  await ui.press({ key: 'more-threads' })
+  // Capped L: the current thread takes at most 60% (13 of 22 rows), its plan folded; then the earlier threads, one row each.
+  console.log(['', 'Threads tab, L, 150 columns:', ...screen(await ui.drawn(), 150)].join('\n'))
+  const [left, , divider] = columns(await ui.drawn())
+  expect(left).toEqual([
+    expect.stringMatching(/^▸ Show tax on each cart line  ·  now {2,}0 of 3 done  ·  sent \d+:\d\d$/),
+    '  ❯ Adding a tax column to CartTable…',
+    '    1 file',
+    '  ● Add a tax column to CartTable',
+    '  ○ Format it with formatMoney',
+    '  ○ Add a cart table test',
+    '  Plan · 4 steps',
+    '',
+    expect.stringMatching(/^✗ Fix checkout tax rounding {2,}11 tests pass  ·  1 fails  ·  3 files  ·  sent \d+:\d\d$/),
+    expect.stringMatching(/^✓ Bump Node 20 to 22 in CI {2,}3 files  ·  1 commit  ·  sent \d+:\d\d$/),
+    expect.stringMatching(/^✓ Why is CI red\? {2,}sent \d+:\d\d$/),
+  ])
+  expect(divider).toEqual(Array(left!.length).fill('│')) // the divider spans every row
+  await $.command.run(whatcha('all'))
   const all = screen(await ui.drawn(), 150)
   console.log(['', 'Threads tab, L, show all, 150 columns:', ...all].join('\n'))
   const body = columns(await ui.drawn())[0]!
@@ -213,20 +226,21 @@ test('height: L takes 20% of the terminal rows, at most 22 and at least 3; "+N m
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.command.run(whatcha('demo'))
   await $.command.run(whatcha('threads'))
-  for (const [rows, cap] of [[24, 4], [50, 10], [120, 22]] as const) {
+  // 24 rows: 4 rows, cut; 50 rows: the 10 rows fit; 120 rows: 22 allowed, the 11 rows fit.
+  for (const [rows, n, isCut] of [[24, 4, true], [50, 10, false], [120, 11, false]] as const) {
     const ui = await $.ui.mount(BAND(rows))
     const [left, , divider] = columns(await ui.drawn())
-    expect([left!.length, divider!.length]).toEqual([cap, cap])
-    expect(left!.at(-1)).toMatch(/^\+\d+ more$/)
+    expect([left!.length, divider!.length]).toEqual([n, n])
+    expect(/^\+\d+ more$/.test(left!.at(-1)!)).toBe(isCut)
     await ui.unmount()
   }
-  const ui = await $.ui.mount(BAND(50))
+  const ui = await $.ui.mount(BAND(24))
   await ui.press({ key: 'more-threads' })
   expect(columns(await ui.drawn())[0]!.join('\n')).not.toContain('more')
   expect(columns(await ui.drawn())[0]).toContain('  ✓ Round tax per line to the cent') // the cut rows are back
   expect(flat(await ui.drawn())).toContain('[Show less]')
   await ui.press({ key: 'less' })
-  expect(columns(await ui.drawn())[0]!.length).toBe(10) // back to normal
+  expect(columns(await ui.drawn())[0]!.length).toBe(4) // back to normal
   await ui.unmount()
 })
 
@@ -239,25 +253,25 @@ test('sizes: S is the one row, M the 5 most useful lines of the tab, L up to 20%
   const rows = async () => ((await band()).children[2]!.children as unknown as R[]).map(rowText)
   expect(flat(await band())).toMatch(/\[ S \]\n\[ M \]\n\[ L \]\n\[▾\]/) // 3-wide click targets
   await ui.press({ key: 'size-compact' })
-  // M, Threads: the current thread's head pinned on top at the full width, then its sub rows from the running task on.
+  // M, Threads: the current thread's head pinned at the full width, its 2 newest rows, then the 2 previous threads.
   const m = screen(await band(), 150)
   console.log(['', 'Threads tab, M, 150 columns:', ...m].join('\n'))
   expect(m.slice(2)).toEqual([
     expect.stringMatching(/^▸ Show tax on each cart line  ·  now {80,}0 of 3 done  ·  sent \d+:\d\d$/),
     '  ❯ Adding a tax column to CartTable…',
     '    1 file',
-    '  ● Add a tax column to CartTable',
-    '  ○ Format it with formatMoney',
+    expect.stringMatching(/^✗ Fix checkout tax rounding {2,}11 tests pass  ·  1 fails  ·  3 files  ·  sent \d+:\d\d$/),
+    expect.stringMatching(/^✓ Bump Node 20 to 22 in CI {2,}3 files  ·  1 commit  ·  sent \d+:\d\d$/),
   ])
-  // ▲ ▼ move the sub rows under the pinned head; at the top ▲ is dim text, not a button.
+  // ▲ ▼ go further back through the earlier threads; at the top ▲ is dim text, not a button.
   expect(flat(await band())).toMatch(/ ▲ \n\[ ▼ \]/)
   await ui.press({ key: 'down' })
   const moved = screen(await band(), 150).slice(2)
-  expect(moved[0]).toMatch(/^▸ Show tax on each cart line/) // still pinned
-  expect(moved.slice(1)).toEqual(['    1 file', '  ● Add a tax column to CartTable', '  ○ Format it with formatMoney', '  ○ Add a cart table test'])
-  expect(flat(await band())).toMatch(/\[ ▲ \]\n\[ ▼ \]/)
+  expect(moved.slice(0, 3)).toEqual(m.slice(2, 5)) // the current thread stays
+  expect(moved.slice(3).map(l => l.split(/ {3,}/)[0])).toEqual(['✓ Bump Node 20 to 22 in CI', '✓ Why is CI red?'])
+  expect(flat(await band())).toMatch(/\[ ▲ \]\n ▼ /) // the oldest is in view: ▼ dims
   await ui.press({ key: 'up' })
-  expect(screen(await band(), 150)[3]).toBe('  ❯ Adding a tax column to CartTable…')
+  expect(screen(await band(), 150).slice(2)).toEqual(m.slice(2))
   await ui.press({ key: 'tab-summary' }) // a tab keeps the band compact
   expect(await rows()).toEqual([
     "~29% done ▰▰▰▱▱▱▱▱▱▱  Haiku's estimate",
@@ -457,11 +471,11 @@ test('Replay: every prompt lands as a thread, tangent, nested step or return, an
   // Current first, then finished threads newest first; no model here, so the title from the prompt names each.
   expect(list!.filter(l => /^\S/.test(l)).map(l => l.split(/ {3,}/)[0])).toEqual([
     '▸ Write short release notes 0.4.0 CHANGELOG.md  ·  now',
-    '✓ Bump node CI workflow 22  ·  done',
-    '✓ Why CI workflow fail repo  ·  answered',
-    '✓ Add dark mode option src/settings.js  ·  done',
+    '✓ Bump node CI workflow 22',
+    '✓ Why CI workflow fail repo',
+    '✓ Add dark mode option src/settings.js',
   ])
-  expect(list).toContain('    2 tests pass  ·  1 file') // plain counts from the log
+  expect(list).toContainEqual(expect.stringMatching(/^✓ Add dark mode option src\/settings\.js {2,}2 tests pass  ·  1 file  ·  sent /)) // plain counts from the log
 
   await ui.press({ key: 'tab-summary' })
   const sent = m.sent()
@@ -546,7 +560,7 @@ test('thread name: the on-device model names a new thread in the background; wit
   const l = await $.ui.mount(BAND(120))
   await l.press({ key: 'tab-threads' })
   expect(columns(await l.drawn())[0]!.filter(r => /^\S/.test(r)).map(r => r.split(/ {3,}/)[0]))
-    .toEqual(['▸ Fix receipt snapshot test  ·  now', '⏸ Checkout timeout at Razorpay  ·  paused'])
+    .toEqual(['▸ Fix receipt snapshot test  ·  now', '⏸ Checkout timeout at Razorpay'])
   await l.unmount()
   expect([threadName('Name: "Fix the tax"'), threadName(''), threadName('one two three four five six seven eight')]).toEqual(['Fix the tax', undefined, 'One two three four five six'])
 })
