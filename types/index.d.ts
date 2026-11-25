@@ -16,8 +16,8 @@ export type Thread = {
   prompt?: string
   /** The prompt that opened this thread (first 300 chars, one line): its shown name. */
   first?: string
-  /** The on-device model's one-line summary of `first` (8-14 words), shown when the prompt is too long for one row. */
-  sum?: string
+  /** The on-device model's 4-8 word gist of `first`, shown in its place unless the band shows raw prompts. */
+  gist?: string
   /** A 3-6 word name the on-device model wrote from the first prompt; the title stands in without it. */
   name?: string
   /** The steps of the last plan Claude wrote for this thread (ExitPlanMode). */
@@ -32,8 +32,8 @@ export type Activity = {
   kind: 'prompt' | 'return' | 'edit' | 'test' | 'error' | 'agent' | 'todo' | 'commit'
   text: string
   thread: number
-  /** A prompt's one-line summary by the on-device model, for its row when the prompt is too long. */
-  sum?: string
+  /** A prompt's 4-8 word gist by the on-device model, shown in its place unless the band shows raw prompts. */
+  gist?: string
   /** When it happened (ms); absent on entries rebuilt from the transcript. */
   at?: number
 }
@@ -52,8 +52,8 @@ export type Summary = { percent: number; tasks: SummaryTask[]; blockers: string[
 /** startedAt: when the running Haiku call began (ms), for the progress bar. */
 export type SummaryCache = { key: string; summary?: Summary; error?: string; isLoading?: boolean; startedAt?: number }
 export type Tab = 'threads' | 'summary' | 'artifacts'
-/** The band: S one row (collapsed), M 4 body rows (compact), L opened up (expanded), or a single icon (min). all: "show all" grows the band to every row the engine gives. scroll: how many rows ▲ moved the timeline back from the newest (0: the newest in view). */
-export type Band = { mode: 'collapsed' | 'compact' | 'expanded' | 'min'; all?: boolean; scroll?: number }
+/** The band: S one row (collapsed), M 6 body rows (compact), L opened up (expanded), or a single icon (min). all: "show all" grows the band to every row the engine gives. scroll: how many rows ▲ moved the timeline back from the newest (0: the newest in view). raw: prompt and thread rows show the prompts as typed, not their on-device gist. */
+export type Band = { mode: 'collapsed' | 'compact' | 'expanded' | 'min'; all?: boolean; scroll?: number; raw?: boolean }
 /** One Artifact this project published: first seen and last published, in ms since the epoch. */
 export type ArtifactRow = { url: string; title: string; created: number; modified: number }
 /** The project's Artifacts; `key` is the `$.store` key, one per project folder. */

@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { DEMO_REPLY, demoObserved, planSteps, sentLabel, threadName, parseSummary, short, snippet, SUMMARY_SYSTEM, summaryInput, summaryPrompt, titleOf, testResult, isEngineText, dropEngineText, isTestCommand, noticeOf, onNotice, promptLine } from '../hooks/observe'
+import { isQuietExit, DEMO_REPLY, demoObserved, planSteps, sentLabel, threadName, parseSummary, short, snippet, SUMMARY_SYSTEM, summaryInput, summaryPrompt, titleOf, testResult, isEngineText, dropEngineText, isTestCommand, noticeOf, onNotice, promptLine } from '../hooks/observe'
 import { bodyCap, safeHref, testCell } from '../hooks/register'
 import { resetOnDevice } from '../hooks/ondevice'
 
@@ -32,18 +32,22 @@ const HOUR = 3_600_000
 const T0 = 1_000 * HOUR
 
 // Nothing sits beneath the plugin: these hooks stand for the engine.
-function engine(on: On, toolText = (_: Record<string, unknown>) => 'ok', toolResult = (_: Record<string, unknown>): unknown => ({}), store = {}, lateMs = 0) {
+function engine(on: On, toolText = (_: Record<string, unknown>) => 'ok', toolResult = (_: Record<string, unknown>): unknown => ({}), store: Record<string, unknown> = {}, lateMs = 0) {
   let calls = 0
   let sent = ''
   let maxTokens = 0
   const clock = mock.clock(on, { now: T0 })
-  mock.store(on, store)
+  // $.store kept in the test's own object, so a test reads back what the band saved.
+  on('store.get', (_, e) => ({ value: store[e.key] }))
+  on('store.set', (_, e) => { store[e.key] = e.value; return { value: undefined } })
+  on('store.delete', (_, e) => { delete store[e.key]; return { value: undefined } })
+  on('store.keys', () => ({ value: Object.keys(store) }))
   on('command.register', () => ({ value: { command: 'whatcha' } }))
   on('env.get', () => ({ value: undefined }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('prompt.submit', (_, e) => ({ text: e.text }))
   on('turn.complete', () => ({ text: '' }))
-  on('tool.call', (_, e) => ({ result: toolResult(e as Record<string, unknown>), text: toolText(e as Record<string, unknown>) }))
+  on('tool.call', (_, e) => { const text = toolText(e as Record<string, unknown>); return { result: toolResult(e as Record<string, unknown>), text, ...(/^Exit code [1-9]/.test(text) ? { isError: true as const } : {}) } })
   on('model.complete', async (_, e) => {
     if (lateMs) await clock.sleep(lateMs) // Haiku answers late: the band shows its updating state meanwhile
     calls++
@@ -140,7 +144,7 @@ test('band: one status row; Threads shows each thread with its tasks and plan, o
   expect(row).not.toContain('threads done')
   expect(row).not.toContain('~29%') // the gauge lives in Summary; the status row gives its room to the thread name
   expect(row).toContain('│')
-  expect(row).toContain('[Artifacts]')
+  expect(row).toContain('[ Artifacts ]')
   expect(row).not.toMatch(/\b[tsa]: |Enter|press /) // keys go to the prompt: no key labels
   await ui.press({ key: 'tab-threads' })
   await $.command.run(whatcha('all'))
@@ -241,29 +245,30 @@ test('height: L takes 20% of the terminal rows, at most 22 and at least 3; the t
   await $.command.run(whatcha('all'))
   expect(timeline(await ui.drawn()).join('\n')).not.toContain('more')
   expect(timeline(await ui.drawn())).toContain('  ✓ Round tax per line to the cent') // the cut rows are back
-  expect(flat(await ui.drawn())).toContain('[Show less]')
+  expect(flat(await ui.drawn())).toContain('[ Show less ]')
   await ui.press({ key: 'less' })
   expect(timeline(await ui.drawn()).length).toBe(4) // back to normal
   await ui.unmount()
 })
 
-test('sizes: S is the one row, M the 5 most useful lines of the tab, L up to 20% of the rows', async ($, on) => {
+test('sizes: S is the one row, M the 6 most useful lines of the tab, L up to 20% of the rows', async ($, on) => {
   engine(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.command.run(whatcha('demo'))
   const ui = await $.ui.mount(BAND(50, 155))
   const band = async () => (await ui.drawn() as unknown as N).children[0]!
   const rows = async () => ((await band()).children[2]!.children as unknown as R[]).map(rowText)
-  expect(flat(await band())).toMatch(/\[ S \]\n\[ M \]\n\[ L \]\n\[▾\]/) // 3-wide click targets
+  expect(flat(await band())).toMatch(/\[ Threads \]\n\[ Summary \]\n\[ Artifacts \]\n┊\n\[ S \]\n\[ M \]\n\[ L \]\n┊\n\[ 🤖 \]\n\[ ▾ \]/) // padded 1 a side, faint ┊ between groups
   await ui.press({ key: 'size-compact' })
-  // M, Threads: the top 5 rows of the timeline, the current thread first.
+  // M, Threads: the top 6 rows of the timeline, the current thread first.
   const m = screen(await band(), 150)
   console.log(['', 'Threads tab, M, 150 columns:', ...m].join('\n'))
-  // Real height: status row + hairline + 5 body rows, inside the engine's maxRows, so it never scrolls a row away.
-  expect(m).toHaveLength(7)
+  // Real height: status row + hairline + 6 body rows, inside the engine's maxRows, so it never scrolls a row away.
+  expect(m).toHaveLength(8)
   // Opens on the newest: the current thread's head pinned on top, its latest prompt and running line lowest.
   expect(subText(m.slice(2))).toEqual([
     expect.stringMatching(/^▸ Show tax on each cart line {20,}┊ +┊ \d+:\d\d$/),
+    '  ● Add a tax column to CartTable',
     '  ○ Format it with formatMoney',
     '  ○ Add a cart table test',
     expect.stringMatching(/^  › Keep the tax column narrow/),
@@ -271,11 +276,11 @@ test('sizes: S is the one row, M the 5 most useful lines of the tab, L up to 20%
   ])
   // ⤒ ▲ go back to older rows, ▼ ⤓ toward the newest; at the newest ▼ ⤓ are dim text, not buttons.
   expect(flat(await band())).toMatch(/\[ ⤒ \]\n\[ ▲ \]\n ▼ \n ⤓ /)
-  // A click moves a page (5 rows less 1); deep in a thread, that thread's head stays on the top row.
-  for (let i = 0; i < 3; i++) await ui.press({ key: 'up' })
+  // A click moves a page (6 rows less 1); deep in a thread, that thread's head stays on the top row.
+  for (let i = 0; i < 2; i++) await ui.press({ key: 'up' })
   const deep = subText(screen(await band(), 150).slice(2))
   expect(nameCol(deep[0]!)).toBe('✗ Fix checkout tax rounding')
-  expect(deep.slice(1)).toEqual(['  ✗ Update the receipt snapshot', '  ❯ Fixing the two failing tax tests…', expect.stringMatching(/^▸ Show tax on each cart line /), '  Plan · 4 steps'])
+  expect(deep.slice(1)).toEqual(['  ❯ Fixing the two failing tax tests…', expect.stringMatching(/^▸ Show tax on each cart line /), '  Plan · 4 steps', '    Steps', '      1. Add a Tax column to CartTable.ts'])
   await ui.press({ key: 'top' })
   expect(heads(screen(await band(), 150).slice(2))).toEqual(['✓ Why is CI red?', '✓ Bump Node 20 to 22 in CI', '✗ Fix checkout tax rounding'])
   expect(flat(await band())).toMatch(/ ⤒ \n ▲ \n\[ ▼ \]\n\[ ⤓ \]/)
@@ -289,7 +294,7 @@ test('sizes: S is the one row, M the 5 most useful lines of the tab, L up to 20%
   ])
   await ui.press({ key: 'tab-artifacts' })
   const arts = await rows()
-  expect(arts).toHaveLength(5)
+  expect(arts).toHaveLength(6)
   expect(arts[0]).toMatch(/Artifacts  ·  click copies the link\s+Created  Modified$/)
   await ui.press({ key: 'size-expanded' })
   await ui.press({ key: 'tab-threads' })
@@ -297,7 +302,7 @@ test('sizes: S is the one row, M the 5 most useful lines of the tab, L up to 20%
   await ui.press({ key: 'size-collapsed' })
   expect(flat(await band())).not.toContain('───') // the status row alone: no rule, no body
   await $.command.run(whatcha('compact'))
-  expect(await rows()).toHaveLength(5)
+  expect(await rows()).toHaveLength(6)
   await ui.unmount()
   // A 7-row slot under 120 columns: the header takes 2 rows, so M draws 4 and the band never scrolls a row away.
   const slot = { ...BAND(50, 105), props: { ...BAND(50, 105).props, maxRows: 7 } }
@@ -307,21 +312,20 @@ test('sizes: S is the one row, M the 5 most useful lines of the tab, L up to 20%
   await short.unmount()
 })
 
-test('Summary board: 4 columns across, wrapping to 2 at 80 columns and 1 at 60, each row filling the width', async ($, on) => {
+test('Summary board: one group a row at the full width, like Threads, so no plain line is cut in a narrow column', async ($, on) => {
   engine(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.command.run(whatcha('demo'))
   await $.command.run(whatcha('summary'))
-  // The board is [head, ...rows of columns, work left]; a row's columns carry their width.
+  // The board is [head, ...one row per group, work left]; each group row carries the full width.
   const board = async (columns: number) => {
     const ui = await $.ui.mount(BAND(50, columns))
-    const kids = bodyOf(await ui.drawn()).children as unknown as { children: { props: { width: number } }[] }[]
+    const kids = bodyOf(await ui.drawn()).children as unknown as { props: { width: number } }[]
     await ui.unmount()
-    return kids.slice(1, -1).map(r => r.children.map(c => c.props.width))
+    return kids.slice(1, -1).map(r => r.props.width)
   }
-  expect(await board(160)).toEqual([[36, 36, 36, 36]]) // 155 body columns: (155 - 3 gaps of 3) / 4
-  expect(await board(85)).toEqual([[38, 38], [38, 38]]) // 80: two across, each half
-  expect(await board(65)).toEqual([[60], [60], [60], [60]]) // 60: one across, full width
+  expect(await board(160)).toEqual([155, 155, 155, 155])
+  expect(await board(65)).toEqual([60, 60, 60, 60])
 })
 
 test('Haiku runs only on the Summary tab, once per state', async ($, on) => {
@@ -556,13 +560,19 @@ test('thread name: the owner\'s first prompt, cleaned; the on-device name only f
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await prompt('[Image #1] okay so um the customer says checkout goes to razorpay and then it just sits there and times out, can you look')
   await new Promise(r => setTimeout(r, 0))
-  // The model's 4 words never stand in for what the owner typed: tags and "okay so um" go, the rest stays.
+  // The status row keeps what the owner typed (tags and "okay so um" go); the thread row shows the model's gist.
   const said = 'The customer says checkout goes to razorpay and then it just sits there and times out, can you look'
   expect(await status()).toContain(`Now (0/1): ${said}`)
   // The thread row ends with the local clock time the prompt was sent, from the prompt.submit stamp.
   const ui = await $.ui.mount(BAND())
   await ui.press({ key: 'tab-threads' })
+  expect(timeline(await ui.drawn())[0]).toMatch(/^▸ Checkout timeout at Razorpay +┊ +┊ \d+:\d\d$/)
+  // 👤 flips every row to the prompt as typed, 🤖 back to the gist.
+  await ui.press({ key: 'raw' })
+  expect(flat(await ui.drawn())).toContain('[ 👤 ]')
   expect(timeline(await ui.drawn())[0]).toMatch(new RegExp(`^▸ ${said} +┊ +┊ \\d+:\\d\\d$`))
+  await ui.press({ key: 'raw' })
+  expect(flat(await ui.drawn())).toContain('[ 🤖 ]')
   expect([sentLabel(new Date(2026, 0, 1, 10, 42).getTime()), sentLabel(new Date(2026, 0, 1, 9, 5).getTime())]).toEqual(['sent 10:42', 'sent 9:05'])
   await ui.unmount()
   await prompt('look at the server logs too') // a step of the same thread: no second model run
@@ -582,7 +592,7 @@ test('thread name: the owner\'s first prompt, cleaned; the on-device name only f
   expect(await status()).toContain('▸ Now (0/3): Fix the receipt snapshot test') // the status row uses the thread glyph
   const l = await $.ui.mount(BAND(120))
   await l.press({ key: 'tab-threads' })
-  expect(heads(timeline(await l.drawn()))).toEqual([`⏸ ${said}`, '⏸ Checkout timeout at Razorpay', '▸ Fix the receipt snapshot test'])
+  expect(heads(timeline(await l.drawn()))).toEqual([`⏸ Checkout timeout at Razorpay`, '⏸ Checkout timeout at Razorpay', '▸ Fix the receipt snapshot test'])
   await l.unmount()
   expect([threadName('Name: "Fix the tax"'), threadName(''), threadName('one two three four five six seven eight')]).toEqual(['Fix the tax', undefined, undefined]) // 8 words: never cut to 6, a cut echo is a fragment
 })
@@ -678,15 +688,15 @@ test('test counts: "18 ✓ Pass" when all pass, "3 ✗ Fail" when all fail, "18�
   expect([testCell('npm test'), testCell('npm test: 0 pass, 0 fail')]).toEqual([[], []])
 })
 
-test('older prompts: one line, the on-device summary or the cut prompt; only the newest gets 2; sub rows in time order', async ($, on) => {
+test('older prompts: one line, the on-device gist or the cut prompt, in M and L; only the newest gets 2; sub rows in time order', async ($, on) => {
   const m = engine(on, e => (String(e.command ?? '').includes('test') ? '# pass 4\n# fail 0' : 'ok'))
-  let reply = 'Make the index rebuild itself whenever any rule file changes.'
+  let reply = 'Auto-update the index on rule changes.'
   on('fs.read', () => ({ value: 'swift source' }))
   on('fs.exists', () => ({ value: true }))
   on('process.run', (_, e) => {
     const stdin = String(e.init?.stdin ?? '')
-    const sum = stdin.includes('Summarize')
-    const out = e.argv[0]!.includes('ondevice-') ? { exitCode: 0, stdout: !sum ? 'Graph rule for references' : stdin.includes('graph rule') ? 'Keep an index of references from global rules to every project' : reply } : { exitCode: 0, stdout: '' }
+    const gist = stdin.includes('gist')
+    const out = e.argv[0]!.includes('ondevice-') ? { exitCode: 0, stdout: !gist ? 'Graph rule for references' : stdin.includes('graph rule') ? 'Index global rule references per project' : reply } : { exitCode: 0, stdout: '' }
     return { value: { stderr: '', isStdoutTruncated: false, isStderrTruncated: false, ...out } }
   })
   resetOnDevice()
@@ -701,7 +711,7 @@ test('older prompts: one line, the on-device summary or the cut prompt; only the
   await m.clock.advance(60_000)
   await $.tool.call({ tool: 'Bash', command: 'npm test' } as never)
   await m.clock.advance(60_000)
-  reply = long // an echo of the prompt is no summary: the prompt stays, cut at the first ┊
+  reply = long // an echo of the prompt is no gist: the prompt stays, cut at the first ┊
   await prompt(`${long} too`)
   await settle()
   await m.clock.advance(60_000)
@@ -711,14 +721,13 @@ test('older prompts: one line, the on-device summary or the cut prompt; only the
   const ui = await $.ui.mount(BAND(120, 125))
   await ui.press({ key: 'tab-threads' })
   const list = screen(bodyOf(await ui.drawn()), 120)
-  ui.unmount()
   const rows = subText(list)
-  // The thread name is the summary of its long first prompt, on one row.
-  expect(nameCol(rows[0]!)).toBe('▸ Keep an index of references from global rules to every project')
+  // L: the thread name is the gist of its long first prompt, on one row.
+  expect(nameCol(rows[0]!)).toBe('▸ Index global rule references per project')
   expect(rows.slice(1, 5)).toEqual([
-    '  › Make the index rebuild itself whenever any rule file changes', // an older prompt: its summary, one row
+    '  › Auto-update the index on rule changes', // an older prompt: its gist, one row
     '  ✓ npm test',
-    expect.stringMatching(/^  › And make the index file update itself every time .*…$/), // a bad summary: the cut prompt
+    expect.stringMatching(/^  › And make the index file update itself every time .*…$/), // a bad gist: the cut prompt
     '  ✎ src/index.ts',
   ])
   // The newest prompt of the timeline is the only one on 2 rows.
@@ -727,6 +736,13 @@ test('older prompts: one line, the on-device summary or the cut prompt; only the
   // Sub rows in time order, oldest first: prompts mixed in with work.
   const times = list.slice(1).map(l => l.match(/(\d+):(\d\d)$/)).filter(Boolean).map(x => +x![1]! * 60 + +x![2]!)
   expect(times).toEqual([...times].sort((a, b) => a - b))
+  // M: the same gists, 6 rows; ▲ shows the older prompt's gist.
+  await ui.press({ key: 'size-compact' })
+  await ui.press({ key: 'up' })
+  const mRows = subText(screen(bodyOf(await ui.drawn()), 120))
+  expect(mRows).toHaveLength(6)
+  expect(mRows.slice(0, 2).map(nameCol)).toEqual(['▸ Index global rule references per project', '  › Auto-update the index on rule changes'])
+  ui.unmount()
 })
 
 test('engine wrappers: pasted_content tags go, the text inside stays; the compaction summary is never a thread', async () => {
@@ -782,5 +798,59 @@ test('loaded mid-session, the band rebuilds the threads from the transcript', as
   expect(list.find(l => l.startsWith('▸'))).toMatch(/^▸ Write the release notes +┊ +┊  9:20$/)
   // Each work row takes its tool result's time from the file: the commit came back at 9:08.
   expect(screen(bodyOf(await ui.drawn()), 150)).toContainEqual(expect.stringMatching(/^  ◆ Fix redirect +┊ {11}┊  9:08$/))
+  await ui.unmount()
+})
+
+test('false stuck: a grep with no match after the work, then a reply, leaves the thread done and Haiku sees no error', async ($, on) => {
+  // The owner's case: tests pass 25/0, the fix is committed, then a check `git log | grep -ci co-authored` prints 0, exit 1.
+  const m = engine(on, e => {
+    const c = String(e.command ?? '')
+    return c.includes('plugin test') ? '# pass 25\n# fail 0' : c.includes('grep -ci') ? 'Exit code 1\n0' : c.includes('build') ? 'Exit code 2\nError: cannot find module x' : 'ok'
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'fix the realtime update bug, updates lag sometimes', wait: false, origin: { kind: 'composer' } } as never)
+  await $.tool.call({ tool: 'Edit', file_path: '/w/hooks/register.tsx', old_string: 'a', new_string: 'b' } as never)
+  await $.tool.call({ tool: 'Bash', command: 'npm run build' } as never) // a real error, fixed by the next steps
+  await $.tool.call({ tool: 'Bash', command: 'claude plugin test .' } as never)
+  await $.tool.call({ tool: 'Bash', command: 'git commit -m "Fix realtime band updates"' } as never)
+  await $.tool.call({ tool: 'Bash', command: 'git log -1 --format=%B | grep -ci "co-authored"' } as never)
+  await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 'a', reason: 'answer' } as never)
+  const ui = await $.ui.mount(BAND())
+  await ui.press({ key: 'tab-threads' })
+  expect(heads(timeline(await ui.drawn()))).toEqual(['▸ Fix the realtime update bug, updates lag sometimes']) // current: ▸, never ✗
+  await ui.press({ key: 'tab-summary' })
+  expect(m.sent()).toContain('[done]')
+  expect(m.sent()).not.toContain('error:')
+  await ui.unmount()
+  // Exit 1 of a pipeline ending in grep, rg, test, [, diff or cmp with no error text is "no match", not a failure.
+  expect([
+    isQuietExit('git log | grep -ci x', 'Exit code 1\n0'), isQuietExit('test -f a && diff a b', 'Exit code 1\n< x\n> y'),
+    isQuietExit('grep x missing.txt', 'Exit code 1\ngrep: missing.txt: No such file or directory'),
+    isQuietExit('npm run build', 'Exit code 1\n'), isQuietExit('grep x f', 'Exit code 2\n'),
+  ]).toEqual([true, true, false, false, false])
+})
+
+test('view: size, 🤖/👤 and tab come back from $.store in a new session, global by default', async ($, on) => {
+  const store: Record<string, unknown> = { view: { mode: 'compact', raw: true, tab: 'artifacts' } }
+  engine(on, undefined, undefined, store)
+  await $.session.start({ cwd: '/p', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount(BAND())
+  expect(flat(await ui.drawn())).toMatch(/\[ 👤 \]/)
+  expect(screen(bodyOf(await ui.drawn()), 150)[0]).toMatch(/Artifacts/)
+  await ui.press({ key: 'size-expanded' })
+  await ui.press({ key: 'raw' })
+  expect(store['view']).toEqual({ mode: 'expanded', raw: false, tab: 'artifacts' })
+  await ui.unmount()
+})
+
+test('view per project: a project saves its own view, starting from the global one', { options: { rememberView: 'per project' } }, async ($, on) => {
+  const store: Record<string, unknown> = { view: { mode: 'compact', raw: false, tab: 'threads' } }
+  engine(on, undefined, undefined, store)
+  await $.session.start({ cwd: '/p', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount(BAND())
+  expect(flat(await ui.drawn())).toContain('───') // M from the global view
+  await ui.press({ key: 'size-collapsed' })
+  expect(store['view:/p']).toEqual({ mode: 'collapsed', raw: false, tab: 'threads' })
+  expect(store['view']).toEqual({ mode: 'compact', raw: false, tab: 'threads' }) // the global view stays
   await ui.unmount()
 })

@@ -4,7 +4,7 @@ import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Regist
 import type { ArtifactRow, Artifacts, Band, Observed, Summary, SummaryCache, Tab, Thread, Todo } from '../types'
 import {
   demoArtifacts, demoObserved, demoSummary, emptyObserved, hash, isTestCommand, onAgent, onArtifact, onCommit, onEdit,
-  dropEngineText, isEngineText, noticeOf, promptLine, untag, onNotice, onError, onPlan, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, sentLabel, short, stamp, timeOf, transcriptTimes, type Times, unlist, testResult, SUMMARY_SYSTEM, summaryInput,
+  dropEngineText, isEngineText, clearErrors, isQuietExit, noticeOf, promptLine, untag, onNotice, onError, onPlan, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, sentLabel, short, stamp, timeOf, transcriptTimes, type Times, unlist, testResult, SUMMARY_SYSTEM, summaryInput,
   summaryPrompt, SUMMARY_OUT, NAME_SYSTEM, threadName, SUM_SYSTEM, SUM_MIN, promptSum, setSum,
 } from './observe'
 import { onDevice } from './ondevice'
@@ -19,7 +19,7 @@ const artifacts = atom({ plugin: 'whatcha-doing', key: 'artifacts' } as const, {
 /** L body rows: 20% of the terminal, at most 22 and at least 3; the engine's maxRows caps it too. */
 export const bodyCap = (rows: number) => Math.max(3, Math.min(22, Math.floor(rows * 0.2)))
 /** M body rows: the few most useful lines of the shown tab. */
-export const COMPACT_ROWS = 5
+export const COMPACT_ROWS = 6
 const TABS: [Tab, string][] = [['threads', 'Threads'], ['summary', 'Summary'], ['artifacts', 'Artifacts']]
 const SIZES: [Band['mode'], string][] = [['collapsed', 'S'], ['compact', 'M'], ['expanded', 'L']]
 
@@ -80,7 +80,7 @@ async function load(r: Reads): Promise<Data> {
 // shortcut: the last drawn timeline's scroll room, for the wheel hook; one band per process, keep per session if that changes.
 let roomNow = 0
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'whatcha',
@@ -100,16 +100,21 @@ export const register: Register = on => {
         const r = replay(msgs, times)
         // Keep the on-device names and send times of threads we already knew,
         // and the summaries of prompts we already knew, so the model never writes one twice.
-        const sum = (a: Observed['log'][number]) => o.log.find(x => x.kind === 'prompt' && x.text === a.text)?.sum
+        const sum = (a: Observed['log'][number]) => o.log.find(x => x.kind === 'prompt' && x.text === a.text)?.gist
         return {
           ...r,
           threads: r.threads.map(t => ({ ...o.threads.find(x => x.title === t.title), ...t })),
-          log: r.log.map(a => (a.kind === 'prompt' && sum(a) ? { ...a, sum: sum(a) } : a)),
+          log: r.log.map(a => (a.kind === 'prompt' && sum(a) ? { ...a, gist: sum(a) } : a)),
         }
       }).catch(() => {})
     }
     // Rebuilt or older long prompts get their one-line summary in the background, newest first.
-    summarize($, (await read($, observed)).log.filter(a => a.kind === 'prompt' && !a.sum).slice(-LOAD_SUMS).reverse())
+    summarize($, (await read($, observed)).log.filter(a => a.kind === 'prompt' && !a.gist).slice(-LOAD_SUMS).reverse())
+    // The view (size, 🤖/👤, tab) outlives the session: one for all, or one per project folder that starts from the global one.
+    viewKey = options.rememberView === 'per project' ? `view:${e.cwd}` : 'view'
+    const v = ((await $.store.get(viewKey).catch(() => undefined)) ?? (await $.store.get('view').catch(() => undefined))) as View | undefined
+    if (v && ['collapsed', 'compact', 'expanded', 'min'].includes(v.mode)) await update($, band, (x): Band => ({ ...x, mode: v.mode, raw: !!v.raw }))
+    if (v && TABS.some(([id]) => id === v.tab)) await update($, tabAtom, () => v.tab)
     // Artifacts outlive the session: one store key per project folder.
     const key = `artifacts:${e.cwd}`
     const rows = ((await $.store.get(key).catch(() => undefined)) as ArtifactRow[] | undefined) ?? []
@@ -135,6 +140,7 @@ export const register: Register = on => {
       await update($, band, (x): Band => ({ ...x, mode: arg === 'compact' ? 'compact' : 'expanded', all: false }))
       if ((await read($, tabAtom)) === 'summary') await showSummary(io)
     }
+    await saveView($)
     // The band itself shows the result: an output line per command only stacked noise above it.
     return {}
   })
@@ -197,7 +203,7 @@ export const register: Register = on => {
     if (e.props.hasSurvey) return next(e)
     // Other mods share this slot: draw theirs below ours. next(e) rejects when nothing answers beneath (tests).
     // The mods below, our state and the band read at once: one after another made every click redraw late.
-    const [below, d, b] = await Promise.all([
+    const [below, seen, b] = await Promise.all([
       next(e).catch(() => undefined),
       load({
         demo: () => read($, demo), observed: () => read($, observed), summary: () => read($, summary),
@@ -205,6 +211,8 @@ export const register: Register = on => {
       }),
       read($, band),
     ])
+    // 👤: every prompt and thread row shows the prompt as typed; the gists stay stored for 🤖.
+    const d = b.raw ? { ...seen, o: { ...seen.o, log: seen.o.log.map(a => ({ ...a, gist: undefined })), threads: seen.o.threads.map(t => ({ ...t, gist: undefined })) } } : seen
     const els = $.ui.resolve(e)
     const { Box, Text, Button } = els
     const io: SummaryIo = {
@@ -217,11 +225,12 @@ export const register: Register = on => {
     const cols = e.props.bodyColumns
     const width = e.surface === 'terminal' ? cols : undefined
     const stack = (mine: NonNullable<typeof below>) => (below ? <Box flexDirection="column">{mine}{below}</Box> : mine)
-    const setMode = (mode: Band['mode']) => update($, band, (x): Band => ({ ...x, mode, all: false, scroll: 0 }))
+    const setView = (v: Partial<Band>) => update($, band, (x): Band => ({ ...x, ...v })).then(() => saveView($))
+    const setMode = (mode: Band['mode']) => setView({ mode, all: false, scroll: 0 })
     const open = async (t: Tab) => {
       await update($, tabAtom, () => t)
       // A tab keeps a Compact band compact; from the one row it opens to Regular.
-      await update($, band, (x): Band => ({ ...x, mode: x.mode === 'compact' ? 'compact' : 'expanded', all: false, scroll: 0 }))
+      await setView({ mode: b.mode === 'compact' ? 'compact' : 'expanded', all: false, scroll: 0 })
       if (t === 'summary') await showSummary(io)
     }
     const showAll = (all: boolean) => update($, band, (x): Band => ({ ...x, all }))
@@ -271,30 +280,36 @@ export const register: Register = on => {
         <Text color={tone}>{g}</Text> Now ({over}/{o.threads.length}): <Text bold>{said || 'waiting for the first prompt'}</Text>
       </Text>
     )
+    // Groups split by a faint ┊; no gap between buttons, each padded 1 space a side, so the status keeps the room.
+    const div = <Text color={FAINT}>┊</Text>
+    const lit = (isOn: boolean, label: string) => (isOn ? <Text bold color="suggestion">{label}</Text> : label)
+    const face = b.raw ? '👤' : '🤖'
     const buttons = (
-      <Box flexDirection="row" gap={isNarrow ? 1 : 2} flexShrink={0}>
+      <Box flexDirection="row" flexShrink={0}>
         {!isNarrow && <Text dimColor>│</Text>}
+        {/* No hotkey labels: keys go to the prompt, the band takes clicks. */}
+        {TABS.map(([id, label]) => (
+          // Dim tabs read as disabled: every tab is full text, the open one bold in the accent color.
+          <Button key={`tab-${id}`} label={` ${label} `} plain onPress={() => open(id)}>{lit(isOpen && tab === id, ` ${label} `)}</Button>
+        ))}
+        {isOpen && tab === 'summary' && <Button key="refresh" plain label=" ↻ " onPress={() => showSummary(io, true)} />}
+        {div}
+        {SIZES.map(([mode, label]) => (
+          <Button key={`size-${mode}`} label={` ${label} `} plain onPress={() => setMode(mode)}>{lit(b.mode === mode, ` ${label} `)}</Button>
+        ))}
+        {div}
+        {/* 🤖 gists, 👤 the prompts as typed. The emoji is 2 columns wide: a 4-wide box holds " 🤖 " in any engine. */}
+        <Box width={4} flexShrink={0}>
+          <Button key="raw" plain label={` ${face} `} onPress={() => setView({ raw: !b.raw })} />
+        </Box>
+        {room > 0 && div}
         {room > 0 && arrow('top', '⤒', back < room, room)}
         {room > 0 && arrow('up', '▲', back < room, back + page)}
         {room > 0 && arrow('down', '▼', back > 0, back - page)}
         {room > 0 && arrow('bottom', '⤓', back > 0, 0)}
-        {/* No hotkey labels: keys go to the prompt, the band takes clicks. */}
-        {TABS.map(([id, label]) => (
-          // Dim tabs read as disabled: every tab is full text, the open one bold in the accent color.
-          <Button key={`tab-${id}`} label={label} plain onPress={() => open(id)}>
-            {isOpen && tab === id ? <Text bold color="suggestion">{label}</Text> : label}
-          </Button>
-        ))}
-        {isOpen && tab === 'summary' && <Button key="refresh" plain label=" ↻ " onPress={() => showSummary(io, true)} />}
-        {isOpen && b.all && <Button key="less" plain label="Show less" onPress={() => showAll(false)} />}
-        {/* The three sizes, the shown one bold in the accent color like a tab; a space each side makes a 3-wide target. */}
-        {SIZES.map(([mode, label]) => (
-          <Button key={`size-${mode}`} label={` ${label} `} plain onPress={() => setMode(mode)}>
-            {b.mode === mode ? <Text bold color="suggestion">{` ${label} `}</Text> : ` ${label} `}
-          </Button>
-        ))}
+        {isOpen && b.all && <Button key="less" plain label=" Show less " onPress={() => showAll(false)} />}
         {/* Not "[-]": the engine draws its own [-] right after, which hides the band fully. */}
-        <Button key="min" plain label="▾" onPress={() => setMode('min')} />
+        <Button key="min" plain label=" ▾ " onPress={() => setMode('min')} />
       </Box>
     )
     const row = isNarrow ? (
@@ -364,9 +379,10 @@ function observe(o: Observed, e: ToolCallInput, ran: ToolCallResult): Observed {
   if (cmd && isTestCommand(cmd)) {
     const r = testResult(cmd, ran.text ?? '', !!ran.isError)
     o = onTest(o, r.ok, r.text)
-  } else if (ran.isError) o = onError(o, tool, ran.text ?? 'failed')
+  } else if (ran.isError && !isQuietExit(cmd, ran.text ?? '')) return onError(o, tool, ran.text ?? 'failed')
   else if (/\bgit\s+commit\b/.test(cmd)) o = onCommit(o, cmd)
-  return o
+  // This step worked (a grep with no match counts too): earlier errors no longer hold the thread.
+  return ran.isError && !isQuietExit(cmd, ran.text ?? '') ? o : clearErrors(o)
 }
 
 /** Prompts the band rebuilds from the transcript at most: the newest ones. */
@@ -407,6 +423,15 @@ export function replay(msgs: SessionMessage[], times: Times = { prompts: [], too
   return o
 }
 
+/** What the band remembers across sessions, in `$.store` under `viewKey`. */
+type View = { mode: Band['mode']; raw?: boolean; tab: Tab }
+// Set at session.start from the "Remember view" setting: 'view' (global) or 'view:<cwd>' (per project).
+let viewKey = 'view'
+async function saveView($: EngineInterface): Promise<void> {
+  const [b, tab] = await Promise.all([read($, band), read($, tabAtom)])
+  await $.store.set(viewKey, { mode: b.mode, raw: !!b.raw, tab } satisfies View).catch(() => {})
+}
+
 /** One on-device model call (onDevice reads only HOME, the helper source and its binary). */
 function ask($: EngineInterface, system: string, text: string): Promise<string | undefined> {
   const host = {
@@ -424,7 +449,7 @@ let sums: Promise<unknown> = Promise.resolve()
 /** Asks the on-device model for a one-line summary of each long prompt that has none; a bad reply leaves the cut prompt. */
 function summarize($: EngineInterface, prompts: Observed['log']): void {
   for (const p of prompts) {
-    if (p.sum || [...promptLine(p.text)].length < SUM_MIN) continue
+    if (p.gist || [...promptLine(p.text)].length < SUM_MIN) continue
     sums = sums.then(() => ask($, SUM_SYSTEM, p.text))
       .then(r => promptSum(r, p.text))
       .then(sum => (sum ? update($, observed, o => setSum(o, p.text, sum)) : undefined))
@@ -526,7 +551,7 @@ function fit({ Text, Button }: Els, lines: JSX.Element[], n: number, act: Acts, 
  * A thread's shown name: the on-device model's one-line summary of its first prompt, else that prompt cleaned of
  * tags, links and paths. When that leaves nothing, the model's name (checked again), else the title.
  */
-const nameOf = (t: Thread) => t.sum || promptLine(t.first ?? '') || ((t.name ? threadName(t.name) : undefined) ?? unlist(untag(t.title)))
+const nameOf = (t: Thread) => t.gist || promptLine(t.first ?? '') || ((t.name ? threadName(t.name) : undefined) ?? unlist(untag(t.title)))
 /** One glyph per thread state, the same in S, M and L: ▸ now, ✓ done, ✗ stuck, ⏸ paused. */
 const headGlyph = (o: Observed, t: Thread): [string, string?] =>
   t.id === o.current ? ['▸', 'suggestion'] : isOver(t) ? ['✓', 'success']
@@ -643,7 +668,7 @@ function threadBlock(els: Els, o: Observed, t: Thread, testsW: number, cols: num
   // The first prompt names the thread. Only the newest prompt of the timeline gets 2 rows; each older one gets
   // one: the model's summary when it wrote one, else the prompt cut at the first ┊.
   const prompts = mine.filter(a => a.kind === 'prompt').slice(1).slice(-3).map(a => {
-    const [one, two] = a === newest ? twoLines(promptLine(a.text), w) : [a.sum ?? promptLine(a.text)]
+    const [one, two] = a === newest ? twoLines(promptLine(a.text), w) : [a.gist ?? promptLine(a.text)]
     return { at: a.at, rows: [
       R(<Text wrap="truncate-end">{IN(2)}<Text dimColor>› </Text>{one}</Text>, [], a.at),
       ...(two ? [R(<Text wrap="truncate-end">{IN(4)}{two}</Text>)] : []),
@@ -696,10 +721,6 @@ const ORDER: [Summary['tasks'][number]['status'], string, string?][] = [
   ['completed', 'Done', 'success'], ['active', 'Active', 'suggestion'], ['blocked', 'Stuck', 'error'], ['remaining', 'Left'],
 ]
 
-/** A board column's least width; under it the columns wrap to the next row (4, 2, then 1 across). */
-export const BOARD_MIN = 34
-const BOARD_GAP = 3
-
 /** While Haiku runs: a thin line that fills over the usual ~8 s a reply takes, never reaching the end first. */
 function updatingBar({ Text }: Els, c: SummaryCache, cols: number, now: number): JSX.Element {
   const secs = Math.max(0, Math.round((now - (c.startedAt ?? now)) / 1000))
@@ -729,34 +750,22 @@ function summaryView(els: Els, c: SummaryCache, cap: number, act: Acts, cols: nu
   // The bar takes a row of the board's room while it shows.
   const bar = c.isLoading ? updatingBar(els, c, cols, now) : undefined
   if (bar) cap -= 1
-  // Board: one column per group, the name then its plain line. Columns that do not get BOARD_MIN wrap to the
-  // next row, and every row's columns share the full width evenly; work left stays one full-width row.
-  const across = Math.max(1, Math.min(ORDER.length, Math.floor(cols / BOARD_MIN)))
-  // One column across has the full width: each task and its plain line share one row, so all four groups fit.
+  // Board: one group a row at the full width, like Threads, each task and its plain line on one row, so a
+  // line is never cut in a narrow column ("fix committ…"); work left is the last row.
   const linesOf = ([st, label, tone]: (typeof ORDER)[number]) => {
     const tasks = s.tasks.filter(t => t.status === st)
     const mark = <Text color={GLYPH[st]?.[1]}>{GLYPH[st]?.[0]}</Text>
     return [
       <Text bold color={tone}>{label} {tasks.length}</Text>,
-      ...tasks.flatMap(t => across === 1
-        ? [<Text wrap="truncate-end">{mark} {t.name}<Text dimColor>  {t.eli5}</Text></Text>]
-        : [<Text wrap="truncate-end">{mark} {t.name}</Text>, <Text dimColor wrap="truncate-end">  {t.eli5}</Text>]),
+      ...tasks.map(t => <Text wrap="truncate-end">{mark} {t.name}<Text dimColor>  {t.eli5}</Text></Text>),
       ...(st === 'blocked' ? s.blockers.map(x => <Text color="error" wrap="truncate-end">  why: {x}</Text>) : []),
     ]
   }
-  const groups = Array.from({ length: Math.ceil(ORDER.length / across) }, (_, i) => ORDER.slice(i * across, (i + 1) * across).map(g => [g[0], linesOf(g)] as const))
-  // Every row gets all it needs when the board fits under the head and the work-left row; else an even share.
-  const needs = groups.map(g => Math.max(...g.map(([, l]) => l.length)))
+  const groups = ORDER.map(g => [g[0], linesOf(g)] as const)
+  // Every group gets all it needs when the board fits under the head and the work-left row; else an even share.
   const even = Math.max(2, Math.floor((cap - 2) / groups.length))
-  const fits = needs.reduce((a, b) => a + b, 0) <= cap - 2
-  const rows = groups.map((group, i) => {
-    const w = Math.floor((cols - BOARD_GAP * (group.length - 1)) / group.length)
-    return (
-      <Box flexDirection="row" gap={BOARD_GAP}>
-        {group.map(([st, lines]) => <Box flexDirection="column" width={w}>{fit(els, lines, fits ? needs[i]! : even, act, `board-${st}`)}</Box>)}
-      </Box>
-    )
-  })
+  const fits = groups.reduce((a, [, l]) => a + l.length, 0) <= cap - 2
+  const rows = groups.map(([st, lines]) => <Box flexDirection="column" width={cols}>{fit(els, lines, fits ? lines.length : even, act, `board-${st}`)}</Box>)
   return (
     <Box flexDirection="column">
       {head}

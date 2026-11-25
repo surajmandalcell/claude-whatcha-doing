@@ -200,14 +200,15 @@ export function onArtifact(rows: ArtifactRow[], url: string, title: string, at: 
 
 /**
  * At the end of a main-loop answer: the current thread is done (it changed or tested something)
- * or answered (read only), unless an error came after its last prompt or a todo is still open.
+ * or answered (read only), unless its last test run since its last prompt failed or a todo is still open.
+ * The reply clears the thread's earlier errors: Claude saw them and answered anyway.
  */
 export function onTurnEnd(o: Observed, isAnswered: boolean): Observed {
   const now = cur(o)
   if (!now || !isAnswered) return o
+  o = clearErrors(o)
   const since = o.log.slice(o.log.findLastIndex(a => a.kind === 'prompt' || a.kind === 'return') + 1)
-  const isOpen = since.some(a => a.kind === 'error' || (a.kind === 'test' && a.text.startsWith('tests fail'))) ||
-    now.todos.some(t => t.status !== 'completed')
+  const isOpen = !!since.findLast(a => a.kind === 'test')?.text.startsWith('tests fail') || now.todos.some(t => t.status !== 'completed')
   if (isOpen) return o
   const did = now.files.length > 0 || o.log.some(a => a.thread === now.id && a.kind === 'test')
   return setThread(o, now.id, t => ({ ...t, state: did ? 'done' : 'answered' }))
@@ -245,13 +246,28 @@ export function testResult(cmd: string, out: string, isError: boolean) {
   return { ok, text: [run, counts].filter(Boolean).join(': ') }
 }
 
-/** A failed test run marks the current thread's running todo as blocked. */
+/** A failed test run marks the current thread's running todo as blocked; a passing one unblocks it. */
 export function onTest(o: Observed, ok: boolean, text: string): Observed {
   o = { ...log(o, 'test', `${ok ? 'tests pass' : 'tests fail'}: ${short(text, 200)}`), lastTest: { ok, text: short(text, 80) } }
-  return ok ? o : setThread(o, o.current, t => ({ ...t, todos: t.todos.map(x => (x.status === 'in_progress' ? { ...x, status: 'blocked' } : x)) }))
+  const [from, to] = ok ? ['blocked', 'in_progress'] as const : ['in_progress', 'blocked'] as const
+  return setThread(o, o.current, t => ({ ...t, todos: t.todos.map(x => (x.status === from ? { ...x, status: to } : x)) }))
 }
 
 export const onError = (o: Observed, tool: string, text: string) => log(o, 'error', `${tool}: ${short(text.split('\n')[0] ?? '', 70)}`)
+/** A later step that worked, or a reply, clears the current thread's errors: a thread is stuck only on its last result. */
+export const clearErrors = (o: Observed): Observed =>
+  o.log.some(a => a.kind === 'error' && a.thread === o.current) ? { ...o, log: o.log.filter(a => !(a.kind === 'error' && a.thread === o.current)) } : o
+// Commands whose exit 1 means "no match" or "not equal", not a failure.
+const QUIET = new Set(['grep', 'egrep', 'fgrep', 'rg', 'test', '[', '[[', 'diff', 'cmp'])
+/**
+ * `git log | grep -ci x` printing 0, `test -f x`, `diff a b`: the pipeline's last command is one of QUIET and it
+ * exited 1 with nothing that reads as an error (Bash gives stdout and stderr as one text).
+ */
+export function isQuietExit(cmd: string, text: string): boolean {
+  const last = cmd.split(/\|\||&&|;|\||\n/).map(s => s.trim()).filter(Boolean).at(-1)?.split(/\s+/)[0]?.replace(/^.*\//, '') ?? ''
+  const [code, ...out] = text.split('\n')
+  return code?.trim() === 'Exit code 1' && QUIET.has(last) && !/error|no such file|not found|denied|fatal|usage:|invalid|unrecognized/i.test(out.join('\n'))
+}
 export const onAgent = (o: Observed, what: string) => log(o, 'agent', `helper: ${short(what, 200)}`)
 /** `git commit -m "msg"`: the message, else the command. */
 export const onCommit = (o: Observed, cmd: string) => log(o, 'commit', `commit: ${short(cmd.match(/-m\s+(["'])(.*?)\1/)?.[2] ?? cmd, 200)}`)
@@ -314,26 +330,26 @@ export function threadName(reply: string | undefined): string | undefined {
   return s[0]!.toUpperCase() + s.slice(1)
 }
 
-export const SUM_SYSTEM = 'Summarize the request in the message as one line of 8 to 14 plain words: a full phrase that says what is asked. Reply with the line only, no quotes.'
-/** A prompt shorter than this fits its row as typed: no summary is asked for. */
-export const SUM_MIN = 90
+export const SUM_SYSTEM = 'Give the gist of the request in the message in 4 to 8 plain words, like a commit subject (Fix realtime band updates). Reply with the words only, no quotes.'
+/** A prompt shorter than this (about 7 words) is its own gist: no model run. */
+export const SUM_MIN = 40
 /**
- * The model's one-line summary of `prompt`, or undefined: under 6 or over 16 words (never cut), ending on a
+ * The model's 4-8 word gist of `prompt`, or undefined: under 3 or over 9 words (never cut), ending on a
  * dangling word, or an echo of the prompt's own opening words.
  */
 export function promptSum(reply: string | undefined, prompt: string): string | undefined {
-  const s = untag((reply ?? '').split('\n')[0]!).replace(/^(summary|line):\s*/i, '').replace(/["“”*_`]/g, '').replace(/\.$/, '').trim()
+  const s = untag((reply ?? '').split('\n')[0]!).replace(/^(gist|summary|subject):\s*/i, '').replace(/["“”*_`]/g, '').replace(/\.$/, '').trim()
   const w = s.split(/\s+/).filter(Boolean)
-  if (w.length < 6 || w.length > 16 || isFragment(w)) return undefined
+  if (w.length < 3 || w.length > 9 || isFragment(w)) return undefined
   const echo = (x: string) => x.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
   if (echo(promptLine(prompt)).startsWith(echo(s))) return undefined
   return s[0]!.toUpperCase() + s.slice(1)
 }
-/** Caches `sum` on every log entry of this prompt, and on the thread it opened. */
-export const setSum = (o: Observed, text: string, sum: string): Observed => ({
+/** Caches the gist on every log entry of this prompt, and on the thread it opened. */
+export const setSum = (o: Observed, text: string, gist: string): Observed => ({
   ...o,
-  log: o.log.map(a => (a.kind === 'prompt' && a.text === text ? { ...a, sum } : a)),
-  threads: o.threads.map(t => (t.first === text ? { ...t, sum } : t)),
+  log: o.log.map(a => (a.kind === 'prompt' && a.text === text ? { ...a, gist } : a)),
+  threads: o.threads.map(t => (t.first === text ? { ...t, gist } : t)),
 })
 
 /** The owner's budget per Haiku call (spec): input and output tokens. */
@@ -358,7 +374,7 @@ export function summaryInput(o: Observed): string {
   const lines = blocks.reverse().flat()
   lines.push(`now #${o.current}`)
   if (o.lastTest) lines.push(`test: ${o.lastTest.ok ? 'pass' : 'fail'} ${short(o.lastTest.text, 40)}`)
-  const err = o.log.findLast(a => a.kind === 'error')
+  const err = o.log.findLast(a => a.kind === 'error' && a.thread === o.current)
   if (err) lines.push(`error: ${short(err.text, 60)}`)
   // A long session drops its oldest lines: 1800 chars plus the ~460 of the prompt stays under 600 tokens.
   while (lines.join('\n').length > 1800 && lines.length > 1) lines.shift()
