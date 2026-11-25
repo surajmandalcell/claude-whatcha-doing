@@ -41,19 +41,37 @@ All looks are settled. Nothing is open.
   1. col 0: the head, `▸` now (accent), `✓` done, `✗` a stuck task, `⏸` paused (the same glyphs in S, M
      and L); the name in bold, taking all the width up to the first meta column. Then 4 **meta columns**,
      each right-aligned and as wide as its longest cell on any thread, so they line up down the list:
-     tests (`11 tests pass` green, `· 1 fail` red) | files | commits | `sent 10:42` (the local clock
-     time of the owner's last prompt to the thread, `sentAt`, stamped at `prompt.submit`). A zero is an
-     empty cell; a column empty on every thread drops. A dim ` ┊ ` separates the columns. Plain counts
+     `sent 10:42` (the local clock time of the owner's last prompt to the thread, `sentAt`, stamped at
+     `prompt.submit`) | commits | files | tests (`11 pass` green, `· 1 fail` red). A zero is an
+     empty cell; a column empty on every thread drops. A ` ┊ ` in `#3a3a3a`, much fainter than dim,
+     separates the columns. Plain counts
      from the thread's own log, no model;
-  2. col 2: `❯ <activeForm>…` of the running task (accent), word for word from TaskCreate or TodoWrite;
-  3. col 2: each task, `✓` done (dim), `●` running, `○` to do, `✗` stuck; its subject only;
-  4. col 2: `Plan · N steps`; only the current thread's plan unfolds at col 4: section headings bold and
+  2. col 2: each later prompt to the thread, `› <prompt> · 12:07` (the last 3, newest lowest), shown at
+     `prompt.submit` so a new prompt is always in view; tags like `[Image #1]` and a leading `- ` drop;
+  3. col 2: `❯ <activeForm>…` of the running task (accent), word for word from TaskCreate or TodoWrite;
+  4. col 2: each task, `✓` done (dim), `●` running, `○` to do, `✗` stuck; its subject only. A thread with
+     no tasks shows its last 3 things done instead, newest lowest: `✎ spec/icons.md` edits, `✓`/`✗` test
+     runs, `◆` commits, `↳` helpers, each with its time;
+  5. col 2: `Plan · N steps`; only the current thread's plan unfolds at col 4: section headings bold and
      dim, items under them at col 6 with their own number (`1.`) or `·`, each nested level 2 deeper.
-  No prompt quote and no model line: a thread points back to its prompt by its name and the time sent.
+  The first prompt has no row: the thread's name and `sent` cell point back to it. The tests cell
+  always has a count (`3 pass`); a run with no count read leaves it empty.
 - **Thread names**: the first prompt of a new thread goes to Apple's on-device model (FoundationModels,
   via `helper/ondevice.swift`) in the background after `prompt.submit`, never blocking it. Its 3-6 word
   reply is stored on the thread as `name`. Without the model the name is the title from the prompt's first
-  clause. The model is used for nothing else.
+  clause. The model is used for nothing else. A name is never a fragment: a reply under 3 or over 6 words
+  (never cut: a cut echo of the prompt reads "here reduce padding, its"), or a clause that ends on a
+  pointing or function word (`these`, `it`, `where`, `its`, `the`, `to`), is dropped; the title then takes
+  the next clause that is whole ("where are these? the rule files" reads `Rule files`). Attachment tags
+  (`[Image #1]`, `[Pasted text #2]`) never reach a name, a title, or the model.
+- **New topic**: a prompt with 8 or more topic words that shares none with the current thread's name and
+  prompts opens a new thread, even without a cue like "new thing". Picks pasted from an options page
+  (every line `- Name: pick`) always answer the current thread.
+- **History**: when the mod loads mid-session (a reload, a resume) and the transcript
+  (`$.session.messages()`, newest 4096 messages) has more prompts than the band saw, the threads are
+  rebuilt from it: prompts, tasks, plans, test runs, commits and edits, the last 200 prompts at most.
+  Names and send times of known threads stay. The transcript has no times, so rebuilt threads have no
+  `sent` cell (the `.jsonl` file holds them, but `$.fs.read` stops at 4 MiB and long sessions are bigger).
 - **Plans**: the ExitPlanMode call's plan markdown, or the plan file Claude writes under
   `~/.claude/plans/`, is parsed into steps and stored on the current thread. Numbered (`1.`, `1)`) and
   bulleted items keep their nesting; a wrapped item's next lines join it; headings stay as section

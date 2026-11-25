@@ -28,8 +28,10 @@ is which. whatcha-doing shows, at a glance, what you asked each session, what it
 
 **Threads** is one timeline of every thread, newest first, the current one on top. Each thread shows its tasks
 and plan steps, one row each, indented thread > task > step, so you see what was said and done before.
-Each thread row ends in lined-up columns: tests (`11 tests pass · 1 fail`) | files | commits | the time you
-sent its last prompt (`sent 10:42`). Under each thread: what Claude is doing now (`❯`), then its tasks.
+Each thread row ends in lined-up columns: the time you sent its last prompt (`sent 10:42`) | commits | files |
+tests (`11 pass · 1 fail`). Under each thread: your later prompts (`› keep it narrow · 12:07`), what Claude is
+doing now (`❯`), then its tasks, or with no tasks its last edits, test runs and commits. Loaded in the
+middle of a session, the band rebuilds the threads from the transcript (the last 200 prompts).
 ▲ ▼ scroll the timeline; the top row always names the thread you are in. Plans from plan mode are parsed into steps. On a Mac with
 Apple Intelligence, the on-device model names each new thread in 3-6 words; it runs on your Mac, nothing is sent.
 
