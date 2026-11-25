@@ -32,43 +32,49 @@ You keep many Claude Code tabs open, and they often do similar jobs. After a whi
 
 ## Features
 
-**Threads** is the main tab, shown above. Your prompts form a timeline of threads. Under each one are Claude's tasks, plan steps and recent work, newest at the bottom. Columns show when you sent it, commits, files and tests (`11 pass · 1 fail`).
+---
 
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="docs/collapsed.png" alt="The band as one status row above the prompt">
-      <br><b>One status row</b><br>
-      The default size. It shows what this tab is doing now and how many threads are done.
-    </td>
-    <td width="50%" valign="top">
-      <img src="docs/summary.png" alt="The Summary tab with Done, Active, Stuck and Left columns">
-      <br><b>Summary</b><br>
-      Haiku estimates how far along the work is, as Done, Active, Stuck and Left.
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="docs/artifacts.png" alt="The Artifacts tab with five published pages">
-      <br><b>Artifacts</b><br>
-      Every page this project published, newest first. Click a name to copy its link.
-    </td>
-    <td width="50%" valign="top">
-      <img src="docs/minimized.png" alt="The band hidden to one small label">
-      <br><b>Hidden</b><br>
-      Click <code>▾</code> and the band shrinks to one small label. Click it to bring the band back.
-    </td>
-  </tr>
-</table>
+**Threads** is the main tab, shown in the cover above. Your prompts form a timeline of threads, newest at the bottom. Under each one are Claude's tasks, plan steps and recent work. Two columns on the right show the tests (`18 ✓ Pass`, `4✓ 1✗`) and the time of each row.
 
-There is more: on a Mac with Apple Intelligence, the on-device model names each thread in 3 to 6 words. `/whatcha all` shows every row with no height limit.
+---
+
+<img src="docs/summary.png" alt="The Summary tab with Done, Active, Stuck and Left columns">
+
+**Summary**<br>
+Haiku estimates how far along the work is, as a board: Done, Active, Stuck and Left, newest on top.
+
+---
+
+<img src="docs/collapsed.png" alt="The band as one status row above the prompt">
+
+**One status row**<br>
+Size S. It shows what this tab is doing now and how many threads are done.
+
+---
+
+<img src="docs/artifacts.png" alt="The Artifacts tab with five published pages">
+
+**Artifacts**<br>
+Every page this project published, newest first. Click a name to copy its link.
+
+---
+
+<img src="docs/minimized.png" alt="The band hidden to one small label">
+
+**Hidden**<br>
+Click `▾` and the band shrinks to one small label. Click it to bring the band back.
+
+---
+
+There is more: on a Mac with Apple Intelligence, the on-device model writes short thread names and one-line gists of older prompts. The 🤖/👤 button switches between gists and your raw prompts. `/whatcha all` shows every row with no height limit.
 
 ## Install
 
 Run this in a terminal:
 
 ```sh
-claude plugin marketplace add surajmandalcell/claude-whatcha-doing && claude plugin install whatcha-doing@claude-whatcha-doing
+claude plugin marketplace add surajmandalcell/claude-whatcha-doing
+claude plugin install whatcha-doing@claude-whatcha-doing
 ```
 
 New sessions show the band at once. In a session that is already open, run `/reload-plugins`.
@@ -81,7 +87,8 @@ New sessions show the band at once. In a session that is already open, run `/rel
 To get new versions on start, run `/plugin`, open Marketplaces, pick `claude-whatcha-doing`, and turn on auto-update. To update by hand:
 
 ```sh
-claude plugin marketplace update claude-whatcha-doing && claude plugin update whatcha-doing@claude-whatcha-doing
+claude plugin marketplace update claude-whatcha-doing
+claude plugin update whatcha-doing@claude-whatcha-doing
 ```
 
 </details>
@@ -93,7 +100,7 @@ Click the tabs and buttons in the band. Your keys still go to the prompt.
 | Size | What it shows |
 | --- | --- |
 | **S** | One status row: `▸ Now (2/4): <your last prompt>` |
-| **M** | 5 rows of the open tab |
+| **M** | 6 rows of the open tab |
 | **L** | Up to 22 rows, or 20% of the screen |
 | **▾** | Hides the band to `▴ @whatcha-doing` |
 
