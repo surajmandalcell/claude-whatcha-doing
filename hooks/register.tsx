@@ -11,14 +11,16 @@ import {
 // Change a tag when that value's fields change: it declines what an older version stored.
 const observed = atom({ plugin: 'whatcha-doing', key: 'observed' } as const, emptyObserved, { shape: 'observed-2' })
 const tabAtom = atom({ plugin: 'whatcha-doing', key: 'tab' } as const, 'threads' as Tab, { shape: 'tab-3' })
-const summary = atom({ plugin: 'whatcha-doing', key: 'summary' } as const, { key: '' } as SummaryCache, { shape: 'summary-1' })
+const summary = atom({ plugin: 'whatcha-doing', key: 'summary' } as const, { key: '' } as SummaryCache, { shape: 'summary-2' })
 const demo = atom({ plugin: 'whatcha-doing', key: 'isDemo' } as const, false, { shape: 'demo-1' })
 const band = atom({ plugin: 'whatcha-doing', key: 'band' } as const, { mode: 'collapsed' } as Band, { shape: 'band-2' })
 const artifacts = atom({ plugin: 'whatcha-doing', key: 'artifacts' } as const, { key: '', rows: [] } as Artifacts, { shape: 'artifacts-1' })
 // The prompt box and its hint line under the band.
 const PROMPT_ROWS = 4
+// The least body rows: enough for the Summary head, the updating bar and a few board rows.
+const MIN_BODY = 6
 /** Body rows: 30% of a tall terminal (40+ rows); a short one may give up to 90%, less the prompt. */
-export const bodyCap = (rows: number) => Math.max(3, rows >= 40 ? Math.floor(rows * 0.3) : Math.floor(rows * 0.9) - PROMPT_ROWS)
+export const bodyCap = (rows: number) => Math.max(MIN_BODY, rows >= 40 ? Math.floor(rows * 0.3) : Math.floor(rows * 0.9) - PROMPT_ROWS)
 const TABS: [Tab, string][] = [['threads', 'Threads'], ['summary', 'Summary'], ['artifacts', 'Artifacts']]
 
 // A hook may not pass `$` on, so each hook spells these closures itself.
@@ -26,6 +28,9 @@ type SummaryIo = {
   state(): Promise<[isDemo: boolean, o: Observed, was: SummaryCache]>
   set(c: SummaryCache): Promise<unknown>
   complete(r: ModelCompleteRequest): Promise<ModelCompleteResult>
+  now(): Promise<number>
+  /** Redraws the band every second while Haiku runs, so the progress bar moves; returns what stops it. */
+  tick(): () => void
 }
 
 /** The one place a model is called: only when the Summary tab is shown, or on Refresh. */
@@ -36,8 +41,9 @@ async function showSummary(io: SummaryIo, force = false) {
   const key = hash(input)
   if (was.isLoading || (!force && was.key === key)) return
   if (o.threads.length === 0) return void (await io.set({ key, error: 'Nothing to sum up yet.' }))
-  await io.set({ key, summary: was.summary, isLoading: true })
-  const r = await io.complete({ model: 'haiku', system: SUMMARY_SYSTEM, prompt: summaryPrompt(input), maxTokens: SUMMARY_OUT, timeoutMs: 30000 })
+  await io.set({ key, summary: was.summary, isLoading: true, startedAt: await io.now() })
+  const stop = io.tick()
+  const r = await io.complete({ model: 'haiku', system: SUMMARY_SYSTEM, prompt: summaryPrompt(input), maxTokens: SUMMARY_OUT, timeoutMs: 30000 }).finally(stop)
   let next: SummaryCache
   if (!r.isAnswered) next = { key, error: `The estimate did not come back (${r.reason}). Press Refresh.` }
   else {
@@ -93,6 +99,8 @@ export const register: Register = on => {
       state: async () => [await read($, demo), await read($, observed), await read($, summary)],
       set: c => update($, summary, () => c),
       complete: r => $.model.complete(r),
+      now: () => $.clock.now(),
+      tick: () => { const t = $.clock.every(1000, () => $.ui.invalidate('ui.render')); return () => t.cancel() },
     }
     const [arg = 'open'] = e.args.trim().split(/\s+/).filter(Boolean)
     const tab = TABS.find(([id]) => id === arg)?.[0]
@@ -129,6 +137,8 @@ export const register: Register = on => {
         state: async () => [await read($, demo), await read($, observed), await read($, summary)],
         set: c => update($, summary, () => c),
         complete: q => $.model.complete(q),
+        now: () => $.clock.now(),
+        tick: () => { const t = $.clock.every(1000, () => $.ui.invalidate('ui.render')); return () => t.cancel() },
       }).catch(() => {})
     }
     return r
@@ -166,6 +176,8 @@ export const register: Register = on => {
       state: async () => [await read($, demo), await read($, observed), await read($, summary)],
       set: c => update($, summary, () => c),
       complete: r => $.model.complete(r),
+      now: () => $.clock.now(),
+      tick: () => { const t = $.clock.every(1000, () => $.ui.invalidate('ui.render')); return () => t.cancel() },
     }
     const cols = e.props.bodyColumns
     const width = e.surface === 'terminal' ? cols : undefined
@@ -319,7 +331,7 @@ export function ago(ms: number): string {
 /** The open band's body for the shown tab, every list cut to `cap` rows (Infinity in the pane). */
 function body(els: Els, d: Data, act: Acts, cap: number, cols: number): JSX.Element {
   const { Box, Text } = els
-  if (d.tab === 'summary') return summaryView(els, d.cache, cap, act, cols)
+  if (d.tab === 'summary') return summaryView(els, d.cache, cap, act, cols, d.now)
   if (d.tab === 'artifacts') return <Box flexDirection="column">{fit(els, artifactRows(els, d.arts, d.now, act, cols), cap, act, 'arts')}</Box>
   const left = timeline(els, d.o, cap, act)
   // A narrow terminal: the list goes under the graph, full width.
@@ -548,19 +560,35 @@ const ORDER: [Summary['tasks'][number]['status'], string, string?][] = [
 export const BOARD_MIN = 34
 const BOARD_GAP = 3
 
-function summaryView(els: Els, c: SummaryCache, cap: number, act: Acts, cols: number): JSX.Element {
+/** While Haiku runs: a thin line that fills over the usual ~8 s a reply takes, never reaching the end first. */
+function updatingBar({ Text }: Els, c: SummaryCache, cols: number, now: number): JSX.Element {
+  const secs = Math.max(0, Math.round((now - (c.startedAt ?? now)) / 1000))
+  const n = Math.max(10, cols - 26)
+  const full = Math.min(n - 1, Math.round((secs / 8) * n * 0.9))
+  return (
+    <Text wrap="truncate-end">
+      <Text color="suggestion">{'━'.repeat(full)}╸</Text><Text dimColor>{'─'.repeat(n - full - 1)}</Text>
+      <Text color="suggestion">  updating with Haiku  {secs} s</Text>
+    </Text>
+  )
+}
+
+function summaryView(els: Els, c: SummaryCache, cap: number, act: Acts, cols: number, now: number): JSX.Element {
   const { Box, Text } = els
   const s = c.summary
   if (!s) {
-    const msg = c.isLoading ? 'Making an estimate…' : c.error ?? 'Opens with an estimate.'
-    return <Text color={c.error ? 'error' : undefined} dimColor={!c.error} wrap="truncate-end">{msg}</Text>
+    if (c.isLoading) return updatingBar(els, c, cols, now)
+    return <Text color={c.error ? 'error' : undefined} dimColor={!c.error} wrap="truncate-end">{c.error ?? 'Opens with an estimate.'}</Text>
   }
   const head = (
     <Text wrap="truncate-end">
       <Text bold>~{s.percent}% done</Text> <Text color="suggestion">{meter(s.percent, 10)}</Text>
-      <Text dimColor>  estimate: Haiku's guess from the task list, not measured{c.isLoading ? '  ·  updating…' : ''}</Text>
+      <Text dimColor>  estimate: Haiku's guess from the task list, not measured</Text>
     </Text>
   )
+  // The bar takes a row of the board's room while it shows.
+  const bar = c.isLoading ? updatingBar(els, c, cols, now) : undefined
+  if (bar) cap -= 1
   // Board: one column per group, the name then its plain line. Columns that do not get BOARD_MIN wrap to the
   // next row, and every row's columns share the full width evenly; work left stays one full-width row.
   const across = Math.max(1, Math.min(ORDER.length, Math.floor(cols / BOARD_MIN)))
@@ -592,6 +620,7 @@ function summaryView(els: Els, c: SummaryCache, cap: number, act: Acts, cols: nu
   return (
     <Box flexDirection="column">
       {head}
+      {bar}
       {rows}
       <Text dimColor wrap="truncate-end">Work left: {s.remaining.join('  ·  ') || 'nothing'}</Text>
     </Box>

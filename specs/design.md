@@ -40,6 +40,8 @@ All looks are settled. Nothing is open.
   and one full-width "Work left" row. Each board column is at least 34 columns wide: columns per row =
   max(1, floor(width / 34)), so 4 across at 160, 2 at 80, 1 at 60. Columns in a row share the width
   evenly (3-column gaps). With one column the plain line sits on the task's row.
+  While Haiku runs, a thin bar (`━━━╸────  updating with Haiku  3 s`) sits under the head and fills over
+  ~8 s without reaching the end; the last board stays below it. With no estimate yet the bar shows alone.
   Haiku runs only while this tab is shown, or on Refresh, cached until the state changes. The demo shows
   a real Haiku reply, frozen.
 - **Summary budget**: at most 600 input and 250 output tokens per call. The input is a compact digest

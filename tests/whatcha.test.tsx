@@ -29,7 +29,7 @@ const HOUR = 3_600_000
 const T0 = 1_000 * HOUR
 
 // Nothing sits beneath the plugin: these hooks stand for the engine.
-function engine(on: On, toolText = (_: Record<string, unknown>) => 'ok', toolResult = (_: Record<string, unknown>): unknown => ({}), store = {}) {
+function engine(on: On, toolText = (_: Record<string, unknown>) => 'ok', toolResult = (_: Record<string, unknown>): unknown => ({}), store = {}, lateMs = 0) {
   let calls = 0
   let sent = ''
   let maxTokens = 0
@@ -41,7 +41,8 @@ function engine(on: On, toolText = (_: Record<string, unknown>) => 'ok', toolRes
   on('prompt.submit', (_, e) => ({ text: e.text }))
   on('turn.complete', () => ({ text: '' }))
   on('tool.call', (_, e) => ({ result: toolResult(e as Record<string, unknown>), text: toolText(e as Record<string, unknown>) }))
-  on('model.complete', (_, e) => {
+  on('model.complete', async (_, e) => {
+    if (lateMs) await clock.sleep(lateMs) // Haiku answers late: the band shows its updating state meanwhile
     calls++
     sent = (e.system ?? '') + e.prompt
     maxTokens = e.maxTokens ?? 0
@@ -198,6 +199,33 @@ test('Haiku runs only on the Summary tab, once per state', async ($, on) => {
   expect(m.calls()).toBe(1) // same state: the cache answers
   await ui.press({ key: 'refresh' })
   expect(m.calls()).toBe(2)
+  await ui.unmount()
+})
+
+test('Summary updating: a thin bar fills under the last estimate while Haiku runs, then leaves', async ($, on) => {
+  const m = engine(on, undefined, undefined, undefined, 8000)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'Fix login', status: 'in_progress', activeForm: 'Fixing login' }] })
+  const ui = await $.ui.mount(BAND())
+  const first = ui.press({ key: 'tab-summary' })
+  await m.clock.advance(3000)
+  const bar = lines(bodyOf(await ui.drawn()))
+  expect(bar).toHaveLength(1) // no estimate yet: the bar alone
+  expect(bar[0]).toMatch(/^━+╸─+  updating with Haiku  3 s$/)
+  await m.clock.advance(5000)
+  await first
+  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'Fix login', status: 'completed', activeForm: 'Fixing login' }] })
+  const again = ui.press({ key: 'refresh' })
+  await m.clock.advance(6000)
+  const shown = lines(bodyOf(await ui.drawn()))
+  expect(shown[0]).toBe("~50% done ▰▰▰▰▰▱▱▱▱▱  estimate: Haiku's guess from the task list, not measured")
+  expect(shown[1]).toMatch(/updating with Haiku  6 s$/) // the bar sits under the head; the old board stays
+  expect(shown.join('\n')).toContain('Making sign in work again')
+  const full = (s: string) => s.split('━').length - 1
+  expect(full(shown[1]!)).toBeGreaterThan(full(bar[0]!))
+  await m.clock.advance(2000)
+  await again
+  expect(flat(await ui.drawn())).not.toContain('updating')
   await ui.unmount()
 })
 

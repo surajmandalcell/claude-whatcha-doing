@@ -32,7 +32,8 @@ export type SummaryTask = {
   eli5: string
 }
 export type Summary = { percent: number; tasks: SummaryTask[]; blockers: string[]; remaining: string[] }
-export type SummaryCache = { key: string; summary?: Summary; error?: string; isLoading?: boolean }
+/** startedAt: when the running Haiku call began (ms), for the progress bar. */
+export type SummaryCache = { key: string; summary?: Summary; error?: string; isLoading?: boolean; startedAt?: number }
 export type Tab = 'threads' | 'summary' | 'artifacts'
 /** The band: one row, opened up, or a single icon. all: "show all" grows the band to every row the engine gives. */
 export type Band = { mode: 'collapsed' | 'expanded' | 'min'; all?: boolean }/** One Artifact this project published: first seen and last published, in ms since the epoch. */
