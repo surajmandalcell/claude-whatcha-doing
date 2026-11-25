@@ -38,10 +38,10 @@ You keep many Claude Code tabs open, and they often do similar jobs. After a whi
 
 ---
 
-<img src="docs/summary.png" alt="The Summary tab with Done, Active, Stuck and Left columns">
+<img src="docs/summary.png" alt="The Summary tab with Left, Active, Stuck and Done columns">
 
 **Summary**<br>
-Haiku estimates how far along the work is, as a board: Done, Active, Stuck and Left, newest on top.
+Haiku estimates how far along the work is, as a board: Left, Active, Stuck and Done, newest on top.
 
 ---
 
