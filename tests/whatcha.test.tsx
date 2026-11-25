@@ -169,7 +169,7 @@ test('sizes: Minimize is the one row, Compact the 3 most useful lines of the tab
   const ui = await $.ui.mount(BAND())
   const band = async () => (await ui.drawn() as unknown as N).children[0]!
   const rows = async () => ((await band()).children[2]!.children as unknown as R[]).map(rowText)
-  expect(flat(await band())).toMatch(/\[Minimize\]\n\[Compact\]\n\[Regular\]\n\[▾\]/)
+  expect(flat(await band())).toMatch(/\[S\]\n\[M\]\n\[L\]\n\[▾\]/)
   await ui.press({ key: 'size-compact' })
   const threads = await rows()
   expect(threads).toHaveLength(3)

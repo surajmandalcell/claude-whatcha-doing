@@ -9,9 +9,9 @@ errors, never generic labels.
 All looks are settled. Nothing is open.
 
 - **Place**: a band above the prompt, no sidebar or side pane.
-- **Sizes**: header buttons `Minimize` (the one status row), `Compact` (3 body lines: Threads the newest
+- **Sizes**: header buttons `S` (the one status row), `M` (3 body lines: Threads the newest
   graph rows, Summary the head or updating bar, Active and Stuck, and Work left, Artifacts the newest one),
-  `Regular` (the full body). The shown size is bold in the accent color. A tab keeps Compact; from the one
+  `L` (the full body). The shown size is bold in the accent color. A tab keeps Compact; from the one
   row it opens Regular. `/whatcha compact` opens Compact.
 - **Height**: Regular's body takes at least 6 rows, and on 40 or more rows up to 55%. On a shorter terminal
   it may take up to 90% less the prompt, but Claude Code caps the band at half the terminal (`maxRows`).

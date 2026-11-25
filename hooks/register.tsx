@@ -27,7 +27,7 @@ export const bodyCap = (rows: number) => Math.max(MIN_BODY, rows >= 40 ? Math.fl
 /** Compact body rows: the few most useful lines of the shown tab. */
 export const COMPACT_ROWS = 3
 const TABS: [Tab, string][] = [['threads', 'Threads'], ['summary', 'Summary'], ['artifacts', 'Artifacts']]
-const SIZES: [Band['mode'], string][] = [['collapsed', 'Minimize'], ['compact', 'Compact'], ['expanded', 'Regular']]
+const SIZES: [Band['mode'], string][] = [['collapsed', 'S'], ['compact', 'M'], ['expanded', 'L']]
 
 // A hook may not pass `$` on, so each hook spells these closures itself.
 type SummaryIo = {
