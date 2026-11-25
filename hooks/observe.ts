@@ -331,24 +331,28 @@ export function threadName(reply: string | undefined): string | undefined {
 }
 
 export const SUM_SYSTEM = 'Give the gist of the request in the message in 4 to 8 plain words, like a commit subject (Fix realtime band updates). Reply with the words only, no quotes.'
+/** The S row's gist, and the retry when the first gist came back too long (a long dictated prompt often gets 12+ words). */
+export const BRIEF_SYSTEM = 'Give the gist of the request in the message in 3 to 5 plain words, like a short commit subject (Fix band redraw). Reply with the words only, no quotes.'
 /** A prompt shorter than this (about 7 words) is its own gist: no model run. */
 export const SUM_MIN = 40
+/** Whether the model still owes this prompt its gist: long enough, and no answer yet ('' is a failed one). */
+export const isPending = (a: { text: string; gist?: string }) => a.gist === undefined && [...promptLine(a.text)].length >= SUM_MIN
 /**
- * The model's 4-8 word gist of `prompt`, or undefined: under 3 or over 9 words (never cut), ending on a
+ * The model's gist of `prompt` in 3 to `most` words, or undefined: shorter or longer (never cut), ending on a
  * dangling word, or an echo of the prompt's own opening words.
  */
-export function promptSum(reply: string | undefined, prompt: string): string | undefined {
+export function promptSum(reply: string | undefined, prompt: string, most = 9): string | undefined {
   const s = untag((reply ?? '').split('\n')[0]!).replace(/^(gist|summary|subject):\s*/i, '').replace(/["“”*_`]/g, '').replace(/\.$/, '').trim()
   const w = s.split(/\s+/).filter(Boolean)
-  if (w.length < 3 || w.length > 9 || isFragment(w)) return undefined
+  if (w.length < 3 || w.length > most || isFragment(w)) return undefined
   const echo = (x: string) => x.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
   if (echo(promptLine(prompt)).startsWith(echo(s))) return undefined
   return s[0]!.toUpperCase() + s.slice(1)
 }
-/** Caches the gist on every log entry of this prompt, and on the thread it opened. */
-export const setSum = (o: Observed, text: string, gist: string): Observed => ({
+/** Caches the gist ('' when the model gave none) and the S row's brief on every log entry of this prompt, and on the thread it opened. */
+export const setSum = (o: Observed, text: string, gist: string, brief?: string): Observed => ({
   ...o,
-  log: o.log.map(a => (a.kind === 'prompt' && a.text === text ? { ...a, gist } : a)),
+  log: o.log.map(a => (a.kind === 'prompt' && a.text === text ? { ...a, gist, ...(brief ? { brief } : {}) } : a)),
   threads: o.threads.map(t => (t.first === text ? { ...t, gist } : t)),
 })
 
@@ -492,7 +496,7 @@ export const demoObserved = (now: number): Observed => ({
     { kind: 'prompt', text: 'next, show the tax on each cart line', thread: 4 },
     { kind: 'todo', text: '0/3 todos done', thread: 4 },
     { kind: 'edit', text: 'cart/CartTable.ts', thread: 4 },
-    { kind: 'prompt', text: '[Image #1] - keep the tax column narrow, right-aligned like Price', thread: 4, at: now - 4 * MIN },
+    { kind: 'prompt', text: '[Image #1] - keep the tax column narrow, right-aligned like Price', thread: 4, at: now - 4 * MIN, gist: '' }, // '': no model in the demo, the prompt as typed
   ],
   lastTest: { ok: false, text: 'npm test: 11 pass, 1 fail' },
 })

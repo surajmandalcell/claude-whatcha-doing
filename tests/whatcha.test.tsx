@@ -575,9 +575,9 @@ test('thread name: the owner\'s first prompt, cleaned; the on-device name only f
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await prompt('[Image #1] okay so um the customer says checkout goes to razorpay and then it just sits there and times out, can you look')
   await new Promise(r => setTimeout(r, 0))
-  // The status row keeps what the owner typed (tags and "okay so um" go); the thread row shows the model's gist.
+  // 🤖: the status row and the thread row show the model's gist; 👤 what the owner typed (tags and "okay so um" go).
   const said = 'The customer says checkout goes to razorpay and then it just sits there and times out, can you look'
-  expect(await status()).toContain(`Now (0/1): ${said}`)
+  expect(await status()).toContain('Now (0/1): Checkout timeout at Razorpay')
   // The thread row ends with the local clock time the prompt was sent, from the prompt.submit stamp.
   const ui = await $.ui.mount(BAND())
   await ui.press({ key: 'tab-threads' })
@@ -585,6 +585,7 @@ test('thread name: the owner\'s first prompt, cleaned; the on-device name only f
   // 👤 flips every row to the prompt as typed, 🤖 back to the gist.
   await ui.press({ key: 'raw' })
   expect(flat(await ui.drawn())).toContain('[ 👤 ]')
+  expect(flat(await ui.drawn())).toContain(`Now (0/1): ${said}`)
   expect(timeline(await ui.drawn())[0]).toMatch(new RegExp(`^▸ ${said} +┊ +┊ \\d+:\\d\\d$`))
   await ui.press({ key: 'raw' })
   expect(flat(await ui.drawn())).toContain('[ 🤖 ]')
@@ -610,6 +611,78 @@ test('thread name: the owner\'s first prompt, cleaned; the on-device name only f
   expect(heads(timeline(await l.drawn()))).toEqual([`⏸ Checkout timeout at Razorpay`, '⏸ Checkout timeout at Razorpay', '▸ Fix the receipt snapshot test'])
   await l.unmount()
   expect([threadName('Name: "Fix the tax"'), threadName(''), threadName('one two three four five six seven eight')]).toEqual(['Fix the tax', undefined, undefined]) // 8 words: never cut to 6, a cut echo is a fragment
+})
+
+test('a new long prompt gets its gist with no toggle: "…" while the model runs, one retry in fewer words; 👤 flips it; S fits at 100', async ($, on) => {
+  engine(on)
+  const sent: number[] = []
+  let open = () => {}
+  const gate = new Promise<void>(r => { open = r })
+  on('fs.read', () => ({ value: 'swift source' }))
+  on('fs.exists', () => ({ value: true }))
+  on('process.run', async (_, e) => {
+    let stdout = ''
+    if (e.argv[0]!.includes('ondevice-')) {
+      const { system, text } = JSON.parse(String(e.init?.stdin)) as { system: string; text: string }
+      sent.push(text.length)
+      await gate
+      const two = text.includes('second')
+      // A long dictated prompt often gets a 12+ word "gist": too long, so the model is asked again in fewer words.
+      stdout = system.includes('3 to 5') ? (two ? 'Gist every new prompt' : 'Fix missing prompt gists')
+        : system.includes('4 to 8') ? (two ? 'Make every new prompt get its gist' : 'Diagnose fresh prompt gist failure, fix queue, redraw, limit input, retry model, show raw prompt')
+        : 'Band gist fixes'
+    }
+    return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  resetOnDevice()
+  const settle = () => new Promise(r => setTimeout(r, 20))
+  const prompt = (text: string) => $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } } as never)
+  const said = 'okay so the gist band often shows nothing for a new prompt, I dictate a big prompt and the threads view shows nothing new and the robot button changes nothing, so find why and fix it'
+  const dictated = `${said}. ${'and here is a lot more dictated detail about the gist band and the prompt rows '.repeat(60)}`
+  const draw = async (columns: number, size?: string) => {
+    const ui = await $.ui.mount(BAND(50, columns + 5))
+    if (size) {
+      await ui.press({ key: size })
+      await ui.press({ key: 'tab-threads' })
+    }
+    const s = screen(await ui.drawn(), columns).filter(Boolean)
+    await ui.unmount()
+    return s
+  }
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await prompt('fix the gist band for new prompts')
+  await prompt(dictated)
+  // Before the model answers: a dim "…" on the newest prompt row and the status row, never an old value.
+  expect((await draw(150, 'size-compact')).at(-1)).toMatch(/^  › …/)
+  expect((await draw(100))[0]).toMatch(/^▸ Now \(0\/1\): …$/)
+  open()
+  await settle()
+  // The answer lands and redraws with no click: 4000 chars of the 5000 sent, cut, never skipped.
+  expect(Math.max(...sent)).toBe(4000)
+  expect(subText((await draw(150, 'size-compact')).slice(2)).at(-1)).toBe('  › Fix missing prompt gists')
+  await prompt(`${said}, second try with more words`)
+  await settle()
+  const m = await draw(150, 'size-compact')
+  console.log(['', 'Threads, M, 150 columns, after a long prompt:', ...m].join('\n'))
+  expect(subText(m.slice(2)).slice(-2)).toEqual(['  › Fix missing prompt gists', '  › Make every new prompt get its gist'])
+  // S: the 3-5 word brief, inside 100 columns; the buttons keep their own row.
+  const s = await draw(100)
+  console.log(['', 'S, 100 columns, 🤖:', ...s].join('\n'))
+  expect(s[0]).toBe('▸ Now (0/1): Gist every new prompt')
+  // 👤: every row shows the prompt as typed, cut at the width; 🤖 brings the gists back.
+  const ui = await $.ui.mount(BAND(50, 105))
+  await ui.press({ key: 'raw' })
+  const raw = screen(await ui.drawn(), 100)
+  console.log(['', 'S, 100 columns, 👤:', ...raw].join('\n'))
+  expect(raw[0]).toMatch(/^▸ Now \(0\/1\): The gist band often shows nothing for a new prompt, I dictate a big prompt and the thr…$/) // cut at 100
+  expect(raw.every(l => [...l].length <= 100)).toBe(true)
+  expect(raw[1]).toContain('Threads  Summary  Artifacts')
+  await ui.press({ key: 'size-compact' })
+  await ui.press({ key: 'tab-threads' })
+  expect(subText(screen(await ui.drawn(), 150).filter(Boolean).slice(2)).slice(-2)).toEqual([expect.stringMatching(/^  › The gist band often shows nothing/), expect.stringMatching(/^    \S/)])
+  await ui.press({ key: 'raw' })
+  expect(subText(screen(await ui.drawn(), 150).filter(Boolean).slice(2)).at(-1)).toBe('  › Make every new prompt get its gist')
+  await ui.unmount()
 })
 
 const TAP = '> node --test\n\nTAP version 13\nok 1 - renders font size\nok 2 - snapshot\n1..2\n# tests 2\n# pass 2\n# fail 0\n'

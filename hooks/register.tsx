@@ -5,7 +5,7 @@ import type { ArtifactRow, Artifacts, Band, Observed, Summary, SummaryCache, Tab
 import {
   demoArtifacts, demoObserved, demoSummary, sortSummary, touchTodos, emptyObserved, hash, isTestCommand, onAgent, onArtifact, onCommit, onEdit,
   dropEngineText, isEngineText, clearErrors, isQuietExit, noticeOf, promptLine, untag, onNotice, onError, onPlan, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, sentLabel, short, stamp, timeOf, transcriptTimes, type Times, unlist, testResult, SUMMARY_SYSTEM, summaryInput,
-  summaryPrompt, SUMMARY_OUT, NAME_SYSTEM, threadName, SUM_SYSTEM, SUM_MIN, promptSum, setSum,
+  summaryPrompt, SUMMARY_OUT, NAME_SYSTEM, threadName, SUM_SYSTEM, BRIEF_SYSTEM, isPending, promptSum, setSum,
 } from './observe'
 import { onDevice } from './ondevice'
 
@@ -104,12 +104,17 @@ export const register: Register = (on, options) => {
         return {
           ...r,
           threads: r.threads.map(t => ({ ...o.threads.find(x => x.title === t.title), ...t })),
-          log: r.log.map(a => (a.kind === 'prompt' && sum(a) ? { ...a, gist: sum(a) } : a)),
+          log: r.log.map(a => (a.kind === 'prompt' && sum(a) !== undefined ? { ...a, gist: sum(a) } : a)),
         }
       }).catch(() => {})
     }
-    // Rebuilt or older long prompts get their one-line summary in the background, newest first.
-    summarize($, (await read($, observed)).log.filter(a => a.kind === 'prompt' && !a.gist).slice(-LOAD_SUMS).reverse())
+    // Rebuilt or older long prompts get their one-line summary in the background, newest first (the newest
+    // with its S row brief); ones past the cap show as typed instead of waiting on "…" forever.
+    const owed = (await read($, observed)).log.filter(a => a.kind === 'prompt' && isPending(a)).reverse()
+    const late = new Set(owed.slice(LOAD_SUMS).map(a => a.text))
+    if (late.size) await update($, observed, o => ({ ...o, log: o.log.map(a => (a.kind === 'prompt' && late.has(a.text) ? { ...a, gist: '' } : a)) })).catch(() => {})
+    summarize($, owed.slice(0, 1), true)
+    summarize($, owed.slice(1, LOAD_SUMS))
     // The view (size, 🤖/👤, tab) outlives the session: one for all, or one per project folder that starts from the global one.
     viewKey = options.rememberView === 'per project' ? `view:${e.cwd}` : 'view'
     const v = ((await $.store.get(viewKey).catch(() => undefined)) ?? (await $.store.get('view').catch(() => undefined))) as View | undefined
@@ -158,7 +163,7 @@ export const register: Register = (on, options) => {
           .then(name => name === undefined ? undefined : update($, observed, x => ({ ...x, threads: x.threads.map(y => (y.id === t.id ? { ...y, name } : y)) })))
           .catch(() => {})
       }
-      if (!notice) summarize($, [o.log.findLast(a => a.kind === 'prompt')!])
+      if (!notice) summarize($, [o.log.findLast(a => a.kind === 'prompt')!], true, e.text)
     }
     return next(e)
   })
@@ -212,7 +217,8 @@ export const register: Register = (on, options) => {
       read($, band),
     ])
     // 👤: every prompt and thread row shows the prompt as typed; the gists stay stored for 🤖.
-    const d = b.raw ? { ...seen, o: { ...seen.o, log: seen.o.log.map(a => ({ ...a, gist: undefined })), threads: seen.o.threads.map(t => ({ ...t, gist: undefined })) } } : seen
+    // '' (not undefined): a row with no gist shows the prompt, never the "…" of a gist on its way.
+    const d = b.raw ? { ...seen, o: { ...seen.o, log: seen.o.log.map(a => ({ ...a, gist: '', brief: undefined })), threads: seen.o.threads.map(t => ({ ...t, gist: '' })) } } : seen
     const els = $.ui.resolve(e)
     const { Box, Text, Button } = els
     const io: SummaryIo = {
@@ -273,11 +279,14 @@ export const register: Register = (on, options) => {
     const arrow = (key: string, glyph: string, can: boolean, to: number) =>
       can ? <Button key={key} plain label={` ${glyph} `} onPress={() => scrollTo(to)} /> : <Text dimColor>{` ${glyph} `}</Text>
     const [g, tone] = now ? headGlyph(o, now) : ['●', 'suggestion']
-    // The latest prompt as typed, cleaned; the thread's name only when the prompt was all tags, links or paths.
-    const said = now && (promptLine(now.prompt ?? '') || nameOf(now))
+    // 🤖 the latest prompt's 3-6 word brief (else its gist), a dim "…" while the model writes it; 👤 or no gist:
+    // the prompt as typed, cleaned; the thread's name only when the prompt was all tags, links or paths.
+    const last = now && o.log.findLast(a => a.kind === 'prompt' && a.thread === now.id)
+    const isWaiting = !!last && isPending(last)
+    const said = now && ((last && (last.brief || last.gist)) || promptLine(now.prompt ?? '') || nameOf(now))
     const status = (
       <Text wrap="truncate-end">
-        <Text color={tone}>{g}</Text> Now ({over}/{o.threads.length}): <Text bold>{said || 'waiting for the first prompt'}</Text>
+        <Text color={tone}>{g}</Text> Now ({over}/{o.threads.length}): {isWaiting ? <Text dimColor>…</Text> : <Text bold>{said || 'waiting for the first prompt'}</Text>}
       </Text>
     )
     // Groups split by a faint ┊; no gap between buttons, each padded 1 space a side, so the status keeps the room.
@@ -443,20 +452,40 @@ function ask($: EngineInterface, system: string, text: string): Promise<string |
     fs: { read: (p: string) => $.fs.read(p), exists: (p: string) => $.fs.exists(p) },
     process: { run: (argv: string[], opts?: { stdin?: string; timeoutMs?: number }) => $.process.run(argv, opts) },
   } as unknown as Parameters<typeof onDevice>[0]
-  return onDevice(host, system, untag(text).slice(0, 2000))
+  // 4000 chars is about 1000 tokens, well inside the model's 4096: a long dictated prompt is cut, never skipped (about 8 s).
+  return onDevice(host, system, untag(text).slice(0, 4000))
 }
 
 // One model run at a time, in the background: a summary never blocks a prompt or a redraw.
-let sums: Promise<unknown> = Promise.resolve()
-/** Asks the on-device model for a one-line summary of each long prompt that has none; a bad reply leaves the cut prompt. */
-function summarize($: EngineInterface, prompts: Observed['log']): void {
-  for (const p of prompts) {
-    if (p.gist || [...promptLine(p.text)].length < SUM_MIN) continue
-    sums = sums.then(() => ask($, SUM_SYSTEM, p.text))
-      .then(r => promptSum(r, p.text))
-      .then(sum => (sum ? update($, observed, o => setSum(o, p.text, sum)) : undefined))
-      .catch(() => {})
+// A just-sent prompt goes to the front, so it never waits behind the gists queued at load.
+type SumJob = { key: string; text: string; brief: boolean }
+const jobs: SumJob[] = []
+let summing = false
+/**
+ * Queues an on-device gist for each long prompt that has none. `now`: a just-sent prompt, first in line, which
+ * also gets the S row's brief. `full`: the prompt as sent; the log keeps only its first 300 chars.
+ */
+function summarize($: EngineInterface, prompts: Observed['log'], now = false, full?: string): void {
+  const add = prompts.filter(isPending).map(p => ({ key: p.text, text: full ?? p.text, brief: now }))
+  if (now) jobs.unshift(...add)
+  else jobs.push(...add)
+  if (!summing) void drain($)
+}
+async function drain($: EngineInterface): Promise<void> {
+  summing = true
+  try {
+    for (let j = jobs.shift(); j; j = jobs.shift()) await gistOf($, j).catch(() => {})
+  } finally {
+    summing = false
   }
+}
+/** One gist, retried once in fewer words; '' when both fail, so the row shows the prompt and never "…" for good. */
+async function gistOf($: EngineInterface, j: SumJob): Promise<void> {
+  if (!(await read($, observed)).log.some(a => a.kind === 'prompt' && a.text === j.key && isPending(a))) return
+  const short = async () => promptSum(await ask($, BRIEF_SYSTEM, j.text), j.text, 6)
+  const gist = promptSum(await ask($, SUM_SYSTEM, j.text), j.text) ?? (await short()) ?? ''
+  const brief = j.brief && gist ? (gist.split(' ').length <= 6 ? gist : await short()) : undefined
+  await update($, observed, o => setSum(o, j.key, gist, brief))
 }
 /** Prompts summarized at load, newest first: the rows most likely in view. */
 const LOAD_SUMS = 20
@@ -661,10 +690,11 @@ function threadBlock(els: Els, o: Observed, t: Thread, testsW: number, cols: num
   // The left area: the band less both columns and the "  › " indent; the newest prompt wraps inside it.
   const w = cols - (testsW + 3) - (TIME_W + 3) - 4
   const newest = o.log.findLast(a => a.kind === 'prompt')
-  // The first prompt names the thread. Only the newest prompt of the timeline gets 2 rows; each older one gets
-  // one: the model's summary when it wrote one, else the prompt cut at the first ┊.
+  // The first prompt names the thread. Each prompt row shows the model's gist (a dim "…" while it is on its way),
+  // else the prompt; the newest wraps to 2 rows, each older one is cut at the first ┊.
   const prompts = mine.filter(a => a.kind === 'prompt').slice(1).slice(-3).map(a => {
-    const [one, two] = a === newest ? twoLines(promptLine(a.text), w) : [a.gist ?? promptLine(a.text)]
+    const text = a.gist || promptLine(a.text)
+    const [one, two] = isPending(a) ? [<Text dimColor>…</Text>] : a === newest ? twoLines(text, w) : [text]
     return { at: a.at, rows: [
       R(<Text wrap="truncate-end">{IN(2)}<Text dimColor>› </Text>{one}</Text>, [], a.at),
       ...(two ? [R(<Text wrap="truncate-end">{IN(4)}{two}</Text>)] : []),

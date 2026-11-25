@@ -32,8 +32,10 @@ export type Activity = {
   kind: 'prompt' | 'return' | 'edit' | 'test' | 'error' | 'agent' | 'todo' | 'commit'
   text: string
   thread: number
-  /** A prompt's 4-8 word gist by the on-device model, shown in its place unless the band shows raw prompts. */
+  /** A prompt's 4-8 word gist by the on-device model, shown in its place unless the band shows raw prompts; '' when the model gave none. */
   gist?: string
+  /** The newest prompt's 3-6 word gist for the S row. */
+  brief?: string
   /** When it happened (ms); absent on entries rebuilt from the transcript. */
   at?: number
 }
