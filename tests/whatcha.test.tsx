@@ -889,3 +889,28 @@ test('false stuck 2: a test script that fails to start, fixed by another command
   expect(m.sent()).not.toMatch(/error:|test: fail|stuck:/)
   await ui.unmount()
 })
+
+test('Summary board: every column header shows; an empty one says so in one dim line, in 4, 2 x 2, 1 column and M', async ($, on) => {
+  engine(on) // Haiku: one active task, one left; Done and Stuck are empty
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'fix the login page', wait: false, origin: { kind: 'composer' } } as never)
+  const draw = async (columns: number) => {
+    const ui = await $.ui.mount(BAND(50, columns))
+    await ui.press({ key: 'tab-summary' })
+    const rows = screen(bodyOf(await ui.drawn()), columns - 5)
+    await ui.unmount()
+    return rows
+  }
+  const wide = await draw(150)
+  expect(wide[1]).toMatch(/^Done 0 +Active 1 +Stuck 0 +Left 1$/)
+  expect(wide[2]).toMatch(/^nothing finished yet +● Fix login +✓ nothing stuck +○ Write a test$/)
+  const mid = (await draw(100)).join('\n')
+  for (const x of ['Done 0', 'nothing finished yet', 'Active 1', 'Stuck 0', '✓ nothing stuck', 'Left 1']) expect(mid).toContain(x)
+  // One column: the empty groups share one line.
+  expect(await draw(60)).toContain('Done: nothing  ·  Stuck: nothing')
+  await $.command.run(whatcha('compact'))
+  const m = await draw(150)
+  expect(m.length).toBeLessThanOrEqual(6)
+  expect(m[1]).toMatch(/^Done 0 +Active 1 +Stuck 0 +Left 1$/)
+  expect(m[2]).toMatch(/^nothing finished yet +● Fix login +✓ nothing stuck +○ Write a test$/)
+})

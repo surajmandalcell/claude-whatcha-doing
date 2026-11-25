@@ -719,6 +719,8 @@ const BOARD_GAP = 3
 const ORDER: [Summary['tasks'][number]['status'], string, string?][] = [
   ['completed', 'Done', 'success'], ['active', 'Active', 'suggestion'], ['blocked', 'Stuck', 'error'], ['remaining', 'Left'],
 ]
+/** The dim line under an empty Summary column (Stuck draws its own, with a green ✓). */
+const EMPTY: Record<string, string> = { completed: 'nothing finished yet', active: 'nothing running', remaining: 'nothing left' }
 
 /** While Haiku runs: a thin line that fills over the usual ~8 s a reply takes, never reaching the end first. */
 function updatingBar({ Text }: Els, c: SummaryCache, cols: number, now: number): JSX.Element {
@@ -770,9 +772,18 @@ function summaryView(els: Els, c: SummaryCache, cap: number, act: Acts, cols: nu
       ...(st === 'blocked' ? s.blockers.map(x => across === 1 || isTight
         ? [<Text color="error" wrap="truncate-end">  why: {x}</Text>]
         : two(`why: ${x}`).map(l => <Text color="error">  {l}</Text>)) : []),
+      // An empty column says so in one dim line instead of blank space.
+      ...(tasks.length ? [] : [[<Text dimColor wrap="truncate-end">{st === 'blocked' && <Text color="success">✓ </Text>}{st === 'blocked' ? 'nothing stuck' : EMPTY[st]}</Text>]]),
     ]
   }
-  const board = (isTight: boolean) => Array.from({ length: Math.ceil(ORDER.length / across) }, (_, i) => ORDER.slice(i * across, (i + 1) * across).map(g => [g[0], linesOf(g, isTight)] as const))
+  // One column: the empty groups share one line ("Stuck: nothing · Left: nothing") to save rows.
+  const empty = across === 1 ? ORDER.filter(([st]) => !s.tasks.some(t => t.status === st)) : []
+  const shown = ORDER.filter(g => !empty.includes(g))
+  const shared = [<Text wrap="truncate-end">{empty.map(([, label, tone], i) => <Text>{i ? <Text dimColor>  ·  </Text> : ''}<Text bold color={tone}>{label}:</Text><Text dimColor> nothing</Text></Text>)}</Text>]
+  const board = (isTight: boolean) => [
+    ...Array.from({ length: Math.ceil(shown.length / across) }, (_, i) => shown.slice(i * across, (i + 1) * across).map(g => [g[0] as string, linesOf(g, isTight)] as const)),
+    ...(empty.length ? [[['empty', [shared] as JSX.Element[][]] as const]] : []),
+  ]
   const needsOf = (b: ReturnType<typeof board>) => b.map(g => Math.max(...g.map(([, l]) => l.flat().length)))
   // Every row gets all it needs when the board fits under the head and the work-left row. Else (M) each task
   // takes one row, name only, and the rows share the room evenly: as many tasks as fit.
