@@ -79,7 +79,7 @@ The header buttons S, M and L pick the size: S is one row, M is 5 lines, L is 20
 
 ## Haiku budget
 
-Only the Summary tab calls a model. It runs only when you open Summary or click Refresh, never on its own.
+Only the Summary tab calls a model. It runs only when you open Summary or click ↻ (refresh), never on its own.
 One call is at most 600 tokens in and 250 tokens out, and the answer is cached until the session changes.
 Everything else is built from hooks alone, with no model call.
 

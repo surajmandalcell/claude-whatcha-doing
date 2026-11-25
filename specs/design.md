@@ -29,8 +29,8 @@ All looks are settled. Nothing is open.
 - **Show all**: a cut list ends in "+N more". A click, or `/whatcha all`, grows the band to every row
   Claude Code gives it; the engine scrolls the rest. `Show less`, a size button, a tab, or the ring leaving
   the band goes back.
-- **Status row** (S, and the header of M and L): `▸ Now (X/N): <thread>  ·  ~45% ▰▰▱▱▱`, X of N threads
-  done; the glyph is the thread's own, as in the Threads tab. The thread name uses all the room up to the tabs, the three sizes and `▾` on the right, and is cut
+- **Status row** (S, and the header of M and L): `▸ Now (X/N): <thread>  │ tabs`, X of N threads
+  done; the glyph is the thread's own, as in the Threads tab. The thread name uses all the room up to a dim │ before the tabs, the three sizes and `▾` on the right, and is cut
   only at that edge. Under 120 columns the buttons take a second row.
 - **Hidden**: `▾` shrinks the band to one right-aligned button, `▴ @whatcha-doing`.
 - **Tabs**: Threads · Summary · Artifacts, clicked. The band never shows key labels or "press x" text:
@@ -68,7 +68,7 @@ All looks are settled. Nothing is open.
   evenly (3-column gaps). With one column the plain line sits on the task's row.
   While Haiku runs, a thin bar (`━━━╸────  updating with Haiku  3 s`) sits under the head and fills over
   ~8 s without reaching the end; the last board stays below it. With no estimate yet the bar shows alone.
-  Haiku runs only while this tab is shown, or on Refresh, cached until the state changes. The demo shows
+  Haiku runs only while this tab is shown, or on ↻ (refresh), cached until the state changes. The demo shows
   a real Haiku reply, frozen.
 - **Summary budget**: at most 600 input and 250 output tokens per call. The input is a compact digest
   (one line per thread with counts, at most 10 todos, only the last test and error, oldest lines dropped

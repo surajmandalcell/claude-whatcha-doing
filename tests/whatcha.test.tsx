@@ -121,7 +121,8 @@ test('band: one status row; Threads shows each thread with its tasks and plan, o
   const row = flat(await ui.drawn())
   expect(row).toContain('Now (2/4): Show tax on each cart line')
   expect(row).not.toContain('threads done')
-  expect(row).toContain('~29%')
+  expect(row).not.toContain('~29%') // the gauge lives in Summary; the status row gives its room to the thread name
+  expect(row).toContain('│')
   expect(row).toContain('[Artifacts]')
   expect(row).not.toMatch(/\b[tsa]: |Enter|press /) // keys go to the prompt: no key labels
   await ui.press({ key: 'tab-threads' })

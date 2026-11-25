@@ -221,7 +221,6 @@ export const register: Register = on => {
     }
 
     const { o, cache, tab } = d
-    const pct = cache.summary?.percent
     const now = byId(o, o.current)
     const over = o.threads.filter(isOver).length
     const isOpen = b.mode === 'expanded' || b.mode === 'compact'
@@ -243,11 +242,11 @@ export const register: Register = on => {
     const status = (
       <Text wrap="truncate-end">
         <Text color={tone}>{g}</Text> Now ({over}/{o.threads.length}): <Text bold>{now ? nameOf(now) : 'waiting for the first prompt'}</Text>
-        {pct !== undefined && <Text>  ·  ~{pct}% <Text color="suggestion">{meter(pct, 5)}</Text></Text>}
       </Text>
     )
     const buttons = (
       <Box flexDirection="row" gap={isNarrow ? 1 : 2}>
+        {!isNarrow && <Text dimColor>│</Text>}
         {room > 0 && arrow('up', '▲', off > 0, off - 1)}
         {room > 0 && arrow('down', '▼', off < room, off + 1)}
         {/* No hotkey labels: keys go to the prompt, the band takes clicks. */}
@@ -257,7 +256,7 @@ export const register: Register = on => {
             {isOpen && tab === id ? <Text bold color="suggestion">{label}</Text> : label}
           </Button>
         ))}
-        {isOpen && tab === 'summary' && <Button key="refresh" plain label="Refresh" onPress={() => showSummary(io, true)} />}
+        {isOpen && tab === 'summary' && <Button key="refresh" plain label=" ↻ " onPress={() => showSummary(io, true)} />}
         {isOpen && b.all && <Button key="less" plain label="Show less" onPress={() => showAll(false)} />}
         {/* The three sizes, the shown one bold in the accent color like a tab; a space each side makes a 3-wide target. */}
         {SIZES.map(([mode, label]) => (
@@ -272,9 +271,9 @@ export const register: Register = on => {
     const row = isNarrow ? (
       <Box flexDirection="column" width={width}>{status}{buttons}</Box>
     ) : (
-      <Box flexDirection="row" alignItems="center" gap={2} width={width}>
-        <Box flexShrink={1}>{status}</Box>
-        <Box flexGrow={1} />
+      <Box flexDirection="row" alignItems="center" gap={1} width={width}>
+        {/* The title takes every column up to the │ before the tabs. */}
+        <Box flexGrow={1} flexShrink={1}>{status}</Box>
         {buttons}
       </Box>
     )
