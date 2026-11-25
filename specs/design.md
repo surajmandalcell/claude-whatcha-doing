@@ -9,17 +9,17 @@ errors, never generic labels.
 All looks are settled. Nothing is open.
 
 - **Place**: a band above the prompt, no sidebar or side pane.
-- **Sizes**: header buttons ` S ` (the one status row), ` M ` (5 body lines), ` L ` (the full body). Each
+- **Sizes**: header buttons ` S ` (the one status row), ` M ` (6 body lines), ` L ` (the full body). Each
   label has a space on both sides, so the click target is 3 columns wide. The shown size is bold in the
   accent color. A tab keeps M; from the one row it opens L. `/whatcha compact` opens M.
-- **M**: Threads shows 5 rows of the timeline (the same rows and indents as L), the newest at the bottom.
-  The top row is always the head of the thread the top visible row belongs to, like a navbar. Status row + hairline + 5 rows must fit the
-  engine's `maxRows`, or the engine scrolls the band and a row is lost: M draws `min(5, maxRows - header
+- **M**: Threads shows 6 rows of the timeline (the same rows and indents as L), the newest at the bottom.
+  The top row is always the head of the thread the top visible row belongs to, like a navbar. Status row + hairline + 6 rows must fit the
+  engine's `maxRows`, or the engine scrolls the band and a row is lost: M draws `min(6, maxRows - header
   - 1)` rows (header: 1 row, 2 under 120 columns). Summary shows the head or updating bar, Active and Stuck, and Work left. Artifacts shows the header and the
   newest one.
 - **Height**: L's body is 20% of the terminal rows, at most 22 and at least 3 (24 rows: 4, 50: 10, 120: 22).
   Claude Code also caps the band at half the terminal (`maxRows`).
-- **Scroll**: ` ⤒ ` ` ▲ ` ` ▼ ` ` ⤓ ` (3 columns wide each) sit left of the tabs in M and L when the
+- **Scroll**: ` ⤒ `` ▲ `` ▼ `` ⤓ ` (3 columns wide each, no gap) sit after the 🤖 button in M and L when the
   Threads timeline is taller than the shown rows. ▲ ▼ move it a page a click (the shown rows less 1), ▲
   back to older rows, ▼ toward the newest; ⤒ ⤓ jump to the oldest and the newest. The mouse wheel over
   the band moves it a row a tick (`ui.scroll`, the engine's own window stays put). An arrow that cannot
@@ -39,6 +39,14 @@ All looks are settled. Nothing is open.
 - **Status row** (S, and the header of M and L): `▸ Now (X/N): <latest prompt>  │ tabs`, X of N threads
   done; the glyph is the thread's own, as in the Threads tab. The latest prompt, cleaned, uses all the room up to a dim │ before the tabs, the three sizes and `▾` on the right, and is cut
   only at that edge. Under 120 columns the buttons take a second row.
+- **Header**: after the │, left to right with no gaps: ` Threads `` Summary `` Artifacts ` ┊ ` S `` M ``
+  L ` ┊ ` 🤖 ` ┊ ` ⤒ `` ▲ `` ▼ `` ⤓ ` ` ▾ `. Each label has 1 space each side; the ┊ dividers are `#3a3a3a`.
+- **🤖 / 👤**: one button after the sizes. 🤖 (default) shows the on-device gists; 👤 shows the prompts as
+  typed, in every thread name and prompt row, in M and L. 2 columns wide, in a 4-wide box.
+- **Remember view**: the size (S, M, L, hidden), 🤖/👤 and the open tab are kept in `$.store` and come
+  back in the next session. The plugin setting `rememberView` (/plugin → whatcha-doing): `global`
+  (default, one view for all sessions) or `per project` (one per cwd, key `view:<cwd>`; a project with
+  nothing saved starts from the global view).
 - **Hidden**: `▾` shrinks the band to one right-aligned button, `▴ @whatcha-doing`.
 - **Tabs**: Threads · Summary · Artifacts, clicked. The band never shows key labels or "press x" text:
   keys go to the prompt box, and the band almost never has focus.
@@ -66,7 +74,7 @@ All looks are settled. Nothing is open.
      runs, `◆` commits, `↳` helpers; their time and counts in the columns;
   4. col 2: each later prompt to the thread, `› <prompt>` (the last 3), shown at `prompt.submit`. Only the
      newest prompt of the whole timeline takes 2 rows, wrapped inside the left area, cut with "…" at the
-     end of the second. Every older prompt is one row: its on-device summary, else the prompt cut at the ┊.
+     end of the second. Every older prompt is one row: its on-device gist, else the prompt cut at the ┊.
      Done rows and prompt rows sort by time together, oldest first; a row with no time keeps its place;
   5. col 2: `❯ <activeForm>…` of the running task (accent), word for word from TaskCreate or TodoWrite,
      the lowest row, like the chat's spinner.
@@ -80,12 +88,12 @@ All looks are settled. Nothing is open.
   reply is stored as `name`. A reply under 3 or over 6 words, or ending on a pointing or function word
   (`these`, `it`, `its`, `the`, `to`), is dropped; the title from the prompt's first whole clause then
   stands in ("where are these? the rule files" reads `Rule files`).
-- **Prompt summaries**: a prompt of 90 characters or more (after cleaning) goes to the on-device model
-  with "summarize as one line of 8 to 14 plain words", one call at a time in the background, never on
+- **Prompt gists**: a prompt of 40 characters or more (after cleaning) goes to the on-device model
+  with "the gist in 4 to 8 plain words, like a commit subject", one call at a time in the background, never on
   redraw: after `prompt.submit`, and at load for the newest 20 long prompts without one. The reply is
-  stored as `sum` on the prompt's log entry (and on its thread when it opened it), so each prompt asks
-  once. A reply under 6 or over 16 words (never cut), ending on a dangling word, or that only repeats the
-  prompt's opening words is dropped. The thread row shows the summary of its first prompt in place of
+  stored as `gist` on the prompt's log entry (and on its thread when it opened it), so each prompt asks
+  once. A reply under 3 or over 9 words (never cut), ending on a dangling word, or that only repeats the
+  prompt's opening words is dropped. The thread row shows the gist of its first prompt in place of
   the prompt; an older `›` row shows its own. Without a summary the cleaned prompt shows, cut at the ┊.
 - **New topic**: a prompt with 8 or more topic words that shares none with the current thread's name and
   prompts opens a new thread, even without a cue like "new thing". Picks pasted from an options page
@@ -103,17 +111,20 @@ All looks are settled. Nothing is open.
   labels; prose, code blocks and headings with no items under them drop.
 - **Summary tab**: Haiku's estimate, marked as an estimate (`~38% done ▰▰▰▰▱▱▱▱▱▱ estimate: Haiku's
   guess…`), then a board of Done, Active, Stuck, Left, each task with one plain line, blockers in red,
-  and one full-width "Work left" row. Each board column is at least 34 columns wide: columns per row =
-  max(1, floor(width / 34)), so 4 across at 160, 2 at 80, 1 at 60. Columns in a row share the width
-  evenly (3-column gaps). With one column the plain line sits on the task's row.
+  and one full-width "Work left" row. Each group is one row at the full band width, like Threads, and
+  each task with its plain line is one line, cut only at the right edge.
   While Haiku runs, a thin bar (`━━━╸────  updating with Haiku  3 s`) sits under the head and fills over
   ~8 s without reaching the end; the last board stays below it. With no estimate yet the bar shows alone.
   Haiku runs only while this tab is shown, or on ↻ (refresh), cached until the state changes. The demo shows
   a real Haiku reply, frozen.
 - **Summary budget**: at most 600 input and 250 output tokens per call. The input is a compact digest
-  (one line per thread with counts, at most 10 todos, only the last test and error, oldest lines dropped
+  (one line per thread with counts, at most 10 todos, only the last test and the current thread's open error, oldest lines dropped
   past 1800 chars). The reply is short-key JSON, at most 8 tasks as `[name, d|a|b|r, ≤8 words]`; work
   left is the left tasks, not asked again. The frozen demo reply is 501 characters, about 125 tokens.
+- **Errors**: a failed step marks its thread ✗ only while it is the last relevant result. A later step that
+  works, a commit, a passing test or the turn ending with a reply clears the thread's earlier errors. Exit 1
+  of a command ending in `grep`, `rg`, `test`, `[`, `diff` or `cmp` with no error text is "no match", not an
+  error.
 - **Artifacts tab**: every Artifact the project published (from the Artifact tool's publish calls),
   newest change first. Two lines each, tied by a dim dot and hook: `● <name>`, then
   `╰╴🔗 <link>` (dim). 🔗 is 2 columns wide; the link is cut 3 columns sooner for it. Two fixed
