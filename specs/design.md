@@ -116,7 +116,9 @@ All looks are settled. Nothing is open.
   its plain line each wrap to 2 lines, then cut with "…"; with one column they share one row. A cut
   column ends in "+N more" (whole tasks). All 4 headers always show; an empty column has one dim line:
   `nothing finished yet`, `nothing running`, `✓ nothing stuck` (✓ green), `nothing left`. In one column the
-  empty groups share one line (`Stuck: nothing  ·  Left: nothing`).
+  empty groups share one line (`Stuck: nothing  ·  Left: nothing`). Like a kanban, every column lists the newest first:
+  Haiku names each task's source (`#3` a thread, `#3.2` its 2nd todo), and the band sorts by that todo's last
+  change, else the thread's last time, else the newer thread and later todo; "+N more" cuts the oldest.
   While Haiku runs, a thin bar (`━━━╸────  updating with Haiku  3 s`) sits under the head and fills over
   ~8 s without reaching the end; the last board stays below it. With no estimate yet the bar shows alone.
   Haiku runs only while this tab is shown, or on ↻ (refresh), cached until the state changes. The demo shows
