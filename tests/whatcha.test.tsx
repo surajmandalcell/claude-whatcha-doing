@@ -1,8 +1,8 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { DEMO_REPLY, demoObserved, planSteps, sentLabel, threadName, parseSummary, short, snippet, SUMMARY_SYSTEM, summaryInput, summaryPrompt, titleOf, testResult, isEngineText, dropEngineText, isTestCommand, noticeOf, onNotice } from '../hooks/observe'
-import { bodyCap, safeHref } from '../hooks/register'
+import { DEMO_REPLY, demoObserved, planSteps, sentLabel, threadName, parseSummary, short, snippet, SUMMARY_SYSTEM, summaryInput, summaryPrompt, titleOf, testResult, isEngineText, dropEngineText, isTestCommand, noticeOf, onNotice, promptLine } from '../hooks/observe'
+import { bodyCap, safeHref, testCell } from '../hooks/register'
 import { resetOnDevice } from '../hooks/ondevice'
 
 test('only clean https URLs become links', () => {
@@ -75,7 +75,9 @@ const rowText = (r: R) => {
   return (w ? cell(r.children![0]).padEnd(w) + r.children!.slice(1).map(cell).join('') : cell(r)).trimEnd()
 }
 // The Threads tab body: one timeline at the full width, as the terminal shows it.
-const timeline = (tree: unknown, w = 150) => screen(bodyOf(tree), w)
+// The timeline as lines; a sub row (indented) shows only its text, its columns checked by the tests that need them.
+const subText = (ls: string[]) => ls.map(l => (/^\s/.test(l) ? nameCol(l) : l))
+const timeline = (tree: unknown, w = 150) => subText(screen(bodyOf(tree), w))
 // A thread row's name, without the meta columns; the thread rows are the ones at column 0.
 const nameCol = (l: string) => l.split(' ┊')[0]!.trimEnd()
 const heads = (rows: string[]) => rows.filter(l => /^\S/.test(l)).map(nameCol)
@@ -147,18 +149,18 @@ test('band: one status row; Threads shows each thread with its tasks and plan, o
   expect(heads(body)).toEqual(['✓ Why is CI red?', '✓ Bump Node 20 to 22 in CI', '✗ Fix checkout tax rounding', '▸ Show tax on each cart line'])
   // Thread > task > plan step: every task and every step on its own row, one indent level each.
   expect(body.slice(0, 9)).toEqual([
-    expect.stringMatching(/^✓ Why is CI red\? +┊ {18}┊ sent \d+:\d\d ┊ res \d+:\d\d$/), // finished threads first; an empty cell when no count
+    expect.stringMatching(/^✓ Why is CI red\? +┊ {11}┊ \d+:\d\d$/), // finished threads first; an empty tests cell with no run
     '  ↳ read the CI logs', // no tasks: its last work instead
-    expect.stringMatching(/^✓ Bump Node 20 to 22 in CI +┊ {18}┊ sent \d+:\d\d ┊ res \d+:\d\d$/),
+    expect.stringMatching(/^✓ Bump Node 20 to 22 in CI +┊ {11}┊ \d+:\d\d$/),
     '  ✓ Use Node 22 in the CI workflow',
-    expect.stringMatching(/^✗ Fix checkout tax rounding +┊ 11 pass · 1 fail ┊ sent \d+:\d\d ┊ res \d+:\d\d$/),
+    expect.stringMatching(/^✗ Fix checkout tax rounding +┊  11✓   1✗ ┊ \d+:\d\d$/), // "11✓ 1✗": 3 digits kept for each
     '  ✓ Round tax per line to the cent',
     '  ● Fix the two failing tax tests',
     '  ✗ Update the receipt snapshot',
     '  ❯ Fixing the two failing tax tests…',
   ])
   expect(body.slice(9)).toEqual([
-    expect.stringMatching(/^▸ Show tax on each cart line {20,}┊ {18}┊ sent \d+:\d\d ┊$/), // still working: no res
+    expect.stringMatching(/^▸ Show tax on each cart line {20,}┊ {11}┊ \d+:\d\d$/),
     '  Plan · 4 steps',
     '    Steps',
     '      1. Add a Tax column to CartTable.ts',
@@ -170,7 +172,7 @@ test('band: one status row; Threads shows each thread with its tasks and plan, o
     '  ● Add a tax column to CartTable',
     '  ○ Format it with formatMoney',
     '  ○ Add a cart table test',
-    expect.stringMatching(/^  › Keep the tax column narrow, right-aligned like Price · \d+:\d\d$/), // a later prompt, tags and list mark gone
+    '  › Keep the tax column narrow, right-aligned like Price', // a later prompt, tags and list mark gone; its time in the column
     '  ❯ Adding a tax column to CartTable…', // the live line is the lowest
   ])
   // tests | files | commits | sent: the same columns on every thread row, right-aligned.
@@ -260,8 +262,8 @@ test('sizes: S is the one row, M the 5 most useful lines of the tab, L up to 20%
   // Real height: status row + hairline + 5 body rows, inside the engine's maxRows, so it never scrolls a row away.
   expect(m).toHaveLength(7)
   // Opens on the newest: the current thread's head pinned on top, its latest prompt and running line lowest.
-  expect(m.slice(2)).toEqual([
-    expect.stringMatching(/^▸ Show tax on each cart line {20,}┊ +┊ sent \d+:\d\d ┊$/),
+  expect(subText(m.slice(2))).toEqual([
+    expect.stringMatching(/^▸ Show tax on each cart line {20,}┊ +┊ \d+:\d\d$/),
     '  ○ Format it with formatMoney',
     '  ○ Add a cart table test',
     expect.stringMatching(/^  › Keep the tax column narrow/),
@@ -271,7 +273,7 @@ test('sizes: S is the one row, M the 5 most useful lines of the tab, L up to 20%
   expect(flat(await band())).toMatch(/\[ ⤒ \]\n\[ ▲ \]\n ▼ \n ⤓ /)
   // A click moves a page (5 rows less 1); deep in a thread, that thread's head stays on the top row.
   for (let i = 0; i < 3; i++) await ui.press({ key: 'up' })
-  const deep = screen(await band(), 150).slice(2)
+  const deep = subText(screen(await band(), 150).slice(2))
   expect(nameCol(deep[0]!)).toBe('✗ Fix checkout tax rounding')
   expect(deep.slice(1)).toEqual(['  ✗ Update the receipt snapshot', '  ❯ Fixing the two failing tax tests…', expect.stringMatching(/^▸ Show tax on each cart line /), '  Plan · 4 steps'])
   await ui.press({ key: 'top' })
@@ -488,7 +490,7 @@ test('Replay: every prompt lands as a thread, tangent, nested step or return, an
     '✓ Bump node in the CI workflow to 22',
     '▸ Write short release notes for 0.4.0 in CHANGELOG.md',
   ])
-  expect(list).toContainEqual(expect.stringMatching(/^✓ Add a dark mode option .*… ┊ 2 pass ┊ sent \d+:\d\d ┊ res \d+:\d\d$/))
+  expect(list).toContainEqual(expect.stringMatching(/^✓ Add a dark mode option .*… ┊   2✓      ┊ \d+:\d\d$/))
 
   await ui.press({ key: 'tab-summary' })
   const sent = m.sent()
@@ -525,7 +527,7 @@ test('plan parsing: numbered and bulleted items with nesting and headings; wrapp
   const ui = await $.ui.mount(BAND(120, 155))
   await ui.press({ key: 'tab-threads' })
   const left = timeline(await ui.drawn())
-  expect(left[0]).toMatch(/^▸ Customer has a checkout issue +┊ sent \d+:\d\d$/)
+  expect(left[0]).toMatch(/^▸ Customer has a checkout issue +┊ +┊ \d+:\d\d$/)
   expect(left!.slice(1, 5)).toEqual(['  Plan · 5 steps', '    Steps', '      1. Reproduce on the live site', '      2. Confirm which store production uses'])
   expect(left).toContain('          1. live, not test')
   await ui.unmount()
@@ -560,7 +562,7 @@ test('thread name: the owner\'s first prompt, cleaned; the on-device name only f
   // The thread row ends with the local clock time the prompt was sent, from the prompt.submit stamp.
   const ui = await $.ui.mount(BAND())
   await ui.press({ key: 'tab-threads' })
-  expect(timeline(await ui.drawn())[0]).toMatch(new RegExp(`^▸ ${said} +┊ sent \\d+:\\d\\d$`))
+  expect(timeline(await ui.drawn())[0]).toMatch(new RegExp(`^▸ ${said} +┊ +┊ \\d+:\\d\\d$`))
   expect([sentLabel(new Date(2026, 0, 1, 10, 42).getTime()), sentLabel(new Date(2026, 0, 1, 9, 5).getTime())]).toEqual(['sent 10:42', 'sent 9:05'])
   await ui.unmount()
   await prompt('look at the server logs too') // a step of the same thread: no second model run
@@ -612,15 +614,15 @@ test('live: a later prompt gets its own row at once, and a thread with no tasks 
   // Picks pasted from an options page: same thread, its own row right away, before Claude does anything.
   await prompt('- Exact: 1 Yellow on blue tile\n- Colors: 1 Yellow with dark outline\n- Morphed: No pick')
   expect(timeline(await ui.drawn())).toEqual([
-    expect.stringMatching(/^▸ Here reduce padding, its too much on the icon tiles +┊ sent \d+:\d\d$/),
-    expect.stringMatching(/^  › Exact: 1 Yellow on blue tile - Colors: .* · \d+:\d\d$/),
+    expect.stringMatching(/^▸ Here reduce padding, its too much on the icon tiles +┊ +┊ \d+:\d\d$/),
+    expect.stringMatching(/^  › Exact: 1 Yellow on blue tile - Colors: .* Morphed: No pick$/),
   ])
   await $.tool.call({ tool: 'Bash', command: 'ls specs' } as never)
   await $.tool.call({ tool: 'Edit', file_path: '/w/spec/icons.md', old_string: 'a', new_string: 'b' } as never)
   await $.tool.call({ tool: 'Edit', file_path: '/w/src/Tile.tsx', old_string: 'a', new_string: 'b' } as never)
   const m = timeline(await ui.drawn())
   // The work, then the prompt it answers, lowest: the newest prompt stays the last row.
-  expect(m.slice(1)).toEqual([expect.stringMatching(/^  ✎ spec\/icons\.md · \d+:\d\d$/), expect.stringMatching(/^  ✎ src\/Tile\.tsx · \d+:\d\d$/), expect.stringMatching(/^  › Exact: /)])
+  expect(m.slice(1)).toEqual(['  ✎ spec/icons.md', '  ✎ src/Tile.tsx', expect.stringMatching(/^  › Exact: /)])
   expect(m.join('\n')).not.toContain('[Image')
   await ui.unmount()
   // An on-device reply cut to 6 words ends mid-clause: not a name.
@@ -649,16 +651,43 @@ test('long names: every ┊ stays in its column and every row is one line, at 15
     const list = screen(body, cols)
     if (cols === 150) console.log(['', 'Threads tab, L, 150 columns, long names:', ...screen(await ui.drawn(), 150)].join('\n'))
     expect(list).toHaveLength(body.children.length) // one line per row: no cell wrapped
+    // Both columns sit on every row, thread rows and sub rows alike, so every ┊ is in the same place top to bottom.
+    expect(new Set(list.map(bars)).size).toBe(1)
+    expect(list.every(l => [...l].length <= cols)).toBe(true)
     const heads = list.filter(l => /^\S/.test(l))
     expect(heads).toHaveLength(2)
-    expect(new Set(heads.map(bars)).size).toBe(1)
-    expect(heads.every(l => [...l].length <= cols)).toBe(true)
-    expect(heads[0]).toMatch(/… ┊ +┊ sent \d+:\d\d ┊ res \d+:\d\d$/)
-    expect(heads[1]).toMatch(/… ┊ 88 pass · 12 fail ┊ sent \d+:\d\d ┊$/) // still working: no res yet
+    expect(heads[0]).toMatch(/… ┊ +┊ \d+:\d\d$/)
+    expect(heads[1]).toMatch(/… ┊  88✓  12✗ ┊ \d+:\d\d$/)
+    // Sub rows put their time, and a test run its counts, in the columns, never in the text.
+    expect(list).toContainEqual(expect.stringMatching(/^  ◆ c11 +┊ {11}┊ \d+:\d\d$/))
+    expect(list).toContainEqual(expect.stringMatching(/^  ✗ npm test +┊  88✓  12✗ ┊ \d+:\d\d$/))
+    // The 2-line prompt wraps inside the left area: its second row ends before the first ┊ too.
+    const p = list.findIndex(l => l.startsWith('  › And make the index file'))
+    expect(list[p]).toMatch(/ ┊ {11}┊ \d+:\d\d$/)
+    expect(list[p + 1]).toMatch(/^    \S.* +┊ {11}┊$/)
     await ui.unmount()
   }
 })
 
+test('test counts: "18✓ 1✗", 3 digits kept for each, 1000 and up as "1.2k"; an empty cell with no count', () => {
+  expect(testCell('npm test: 18 pass, 1 fail')).toEqual([[' 18✓', 'success'], ['   1✗', 'error']])
+  expect(testCell('npm test: 7 pass, 0 fail')).toEqual([['  7✓', 'success'], ['     ']])
+  expect(testCell('npm test: 1234 pass, 0 fail')[0]).toEqual(['1.2k✓', 'success'])
+  expect(testCell('npm test')).toEqual([])
+})
+
+test('engine wrappers: pasted_content tags go, the text inside stays; the compaction summary is never a thread', async () => {
+  expect(promptLine('<pasted_content id="384e"> - Overall: keep the dock small</pasted_content>')).toBe('Overall: keep the dock small')
+  const summary = 'This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion.'
+  expect(isEngineText(summary)).toBe(true)
+  // Saved before 1.0.20: a thread opened by the summary keeps its work but drops the summary as its name.
+  const o = dropEngineText({
+    current: 1, threads: [{ id: 1, title: titleOf(summary), first: summary, name: 'Claude file update delay', state: 'active', todos: [], files: [] }],
+    log: [{ kind: 'prompt', text: summary, thread: 1 }, { kind: 'edit', text: 'src/a.ts', thread: 1 }],
+  })
+  expect(o.log.map(a => a.kind)).toEqual(['edit'])
+  expect(o.threads[0]).toMatchObject({ title: 'Earlier work', first: undefined, name: undefined })
+})
 test('loaded mid-session, the band rebuilds the threads from the transcript', async ($, on) => {
   engine(on)
   on('session.messages', () => ({
@@ -680,7 +709,7 @@ test('loaded mid-session, the band rebuilds the threads from the transcript', as
     '{"type":"user","timestamp":"cut line from the tail', // a tail starts mid-line
     JSON.stringify({ type: 'user', timestamp: at(9, 5), message: { content: 'fix the login redirect bug' } }),
     JSON.stringify({ type: 'assistant', timestamp: at(9, 7), message: { stop_reason: 'tool_use', content: [] } }),
-    JSON.stringify({ type: 'user', timestamp: at(9, 8), message: { content: [{ type: 'tool_result', content: 'ok' }] } }),
+    JSON.stringify({ type: 'user', timestamp: at(9, 8), message: { content: [{ type: 'tool_result', tool_use_id: '2', content: 'ok' }] } }),
     JSON.stringify({ type: 'assistant', timestamp: at(9, 12), message: { stop_reason: 'end_turn', content: [] } }),
     JSON.stringify({ type: 'user', timestamp: at(9, 20), message: { content: [{ type: 'text', text: 'new thing: write the release notes' }] } }),
   ].join('\n')
@@ -696,7 +725,9 @@ test('loaded mid-session, the band rebuilds the threads from the transcript', as
   await ui.press({ key: 'tab-threads' })
   const list = timeline(await ui.drawn())
   expect(heads(list)).toEqual(['✓ Fix the login redirect bug', '▸ Write the release notes'])
-  expect(list[0]).toMatch(/^✓ Fix the login redirect bug +┊ sent 9:05 ┊ res 9:12$/)
-  expect(list.find(l => l.startsWith("▸"))).toMatch(/^▸ Write the release notes +┊ sent 9:20 ┊$/) // no end_turn after it: still working
+  expect(list[0]).toMatch(/^✓ Fix the login redirect bug +┊ +┊  9:05$/)
+  expect(list.find(l => l.startsWith('▸'))).toMatch(/^▸ Write the release notes +┊ +┊  9:20$/)
+  // Each work row takes its tool result's time from the file: the commit came back at 9:08.
+  expect(screen(bodyOf(await ui.drawn()), 150)).toContainEqual(expect.stringMatching(/^  ◆ Fix redirect +┊ {11}┊  9:08$/))
   await ui.unmount()
 })

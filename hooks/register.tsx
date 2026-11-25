@@ -4,7 +4,7 @@ import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Regist
 import type { ArtifactRow, Artifacts, Band, Observed, Summary, SummaryCache, Tab, Thread, Todo } from '../types'
 import {
   demoArtifacts, demoObserved, demoSummary, emptyObserved, hash, isTestCommand, onAgent, onArtifact, onCommit, onEdit,
-  dropEngineText, isEngineText, noticeOf, promptLine, untag, onNotice, onError, onPlan, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, sentLabel, short, stamp, replied, timeOf, transcriptTimes, type PromptTime, unlist, testResult, SUMMARY_SYSTEM, summaryInput,
+  dropEngineText, isEngineText, noticeOf, promptLine, untag, onNotice, onError, onPlan, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, sentLabel, short, stamp, timeOf, transcriptTimes, type Times, unlist, testResult, SUMMARY_SYSTEM, summaryInput,
   summaryPrompt, SUMMARY_OUT, NAME_SYSTEM, threadName,
 } from './observe'
 import { onDevice } from './ondevice'
@@ -96,7 +96,7 @@ export const register: Register = on => {
       await update($, observed, o => {
         const said = o.log.filter(a => a.kind === 'prompt')
         // Rebuild when the transcript has prompts we never saw, or times for prompts rebuilt before without them.
-        if (promptsIn(msgs) <= said.length && !(times.length && said.some(a => a.at === undefined))) return o
+        if (promptsIn(msgs) <= said.length && !(times.prompts.length && said.some(a => a.at === undefined))) return o
         const r = replay(msgs, times)
         // Keep the on-device names and send times of threads we already knew.
         return { ...r, threads: r.threads.map(t => ({ ...o.threads.find(x => x.title === t.title), ...t })) }
@@ -159,10 +159,7 @@ export const register: Register = on => {
 
   // The main loop's answer closes the current thread (done or answered); a subagent's does not.
   on('turn.complete', async ($, e, next) => {
-    if (!e.agentId) {
-      const at = await $.clock.now()
-      await update($, observed, o => replied(onTurnEnd(o, e.reason === 'answer'), at)).catch(() => {})
-    }
+    if (!e.agentId) await update($, observed, o => onTurnEnd(o, e.reason === 'answer')).catch(() => {})
     const r = await next(e)
     // An open Summary tab follows the work: re-ask Haiku once per turn, only when the threads changed (the key dedups).
     if (!e.agentId && (await read($, tabAtom)) === 'summary' && ['compact', 'expanded'].includes((await read($, band)).mode)) {
@@ -381,23 +378,27 @@ const promptsIn = (msgs: SessionMessage[]) => msgs.filter(m => isPrompt(m) && !n
  * The threads rebuilt from the session's transcript, for what happened before the mod loaded: each prompt,
  * then its tool calls, through the same steps as live. `times` (from the transcript file) gives each prompt its sent and res.
  */
-export function replay(msgs: SessionMessage[], times: PromptTime[] = []): Observed {
+export function replay(msgs: SessionMessage[], times: Times = { prompts: [], tools: {} }): Observed {
   const starts = msgs.flatMap((m, i) => (isPrompt(m) && !noticeOf(m.text) ? [i] : []))
   let o = emptyObserved
   let k = 0
   for (const m of msgs.slice(starts.at(-REPLAY_PROMPTS) ?? 0)) {
     if (m.role === 'assistant') {
-      for (const u of m.toolUses) o = observe(o, { ...u.input, tool: u.tool } as unknown as ToolCallInput, u as unknown as ToolCallResult)
+      for (const u of m.toolUses) {
+        o = observe(o, { ...u.input, tool: u.tool } as unknown as ToolCallInput, u as unknown as ToolCallResult)
+        // The transcript file's stamp for its result gives the work row its time.
+        const at = times.tools[u.tool_use_id]
+        if (at !== undefined) o = stamp(o, at)
+      }
     } else if (isPrompt(m)) {
       const notice = noticeOf(m.text)
       // A new prompt means the turn before it ended with an answer.
       o = notice ? onNotice(o, notice) : onPrompt(onTurnEnd(o, true), m.text)
-      // The transcript file's stamps give the sent and res times the messages lack.
-      const i = notice ? -1 : timeOf(times, m.text, k)
+      // The messages carry no times; the transcript file's stamps give the sent time.
+      const i = notice ? -1 : timeOf(times.prompts, m.text, k)
       if (i >= 0) {
         k = i + 1
-        o = stamp(o, times[i]!.at, true)
-        if (times[i]!.res !== undefined) o = replied(o, times[i]!.res!)
+        o = stamp(o, times.prompts[i]!.at, true)
       }
     }
   }
@@ -507,19 +508,21 @@ const rank = (o: Observed, t: Thread) => (t.id === o.current ? 0 : isOver(t) ? 2
 export const ordered = (o: Observed) => [...o.threads].sort((a, b) => rank(o, b) - rank(o, a))
 const running = (t: Thread) => t.todos.find(d => d.status === 'in_progress')
 
-/** "11 pass · 1 fail", "sent 10:42", "res 10:49": the 3 right-hand columns of a thread's row, from its own log. */
+/** A cell's text in parts, each with its color (none: dim). */
 type Part = [string, string?]
-export function metaOf(o: Observed, t: Thread): Part[][] {
-  const test = o.log.findLast(a => a.thread === t.id && a.kind === 'test')
-  const m = test?.text.match(/(\d+) pass, (\d+) fail/)
-  const tests: Part[] = !test ? []
-    : m ? [[`${m[1]} pass`, 'success'], ...(+m[2]! ? [[' · '], [`${m[2]} fail`, 'error']] as Part[] : [])]
-    : [] // no count read from the run: an empty cell, never a bare "tests pass"
-  // res: when the reply to the latest prompt finished; empty while Claude still works on it.
-  const res = t.resAt !== undefined && (t.sentAt === undefined || t.resAt >= t.sentAt)
-  return [tests, t.sentAt === undefined ? [] : [[sentLabel(t.sentAt)]], res ? [[`res ${sentLabel(t.resAt!).slice(5)}`]] : []]
+const num = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
+/** "18✓ 1✗": a test run's counts, 3 digits reserved each (1000+ reads "1.2k"); empty when no count was read. */
+export function testCell(text = ''): Part[] {
+  const m = text.match(/(\d+) pass, (\d+) fail/)
+  if (!m) return []
+  return [[`${num(+m[1]!).padStart(3)}✓`, 'success'], +m[2]! ? [` ${num(+m[2]!).padStart(3)}✗`, 'error'] : [' '.repeat(5)]]
 }
 const lenOf = (c: Part[]) => c.reduce((a, [s]) => a + [...s].length, 0)
+/** The tests column's least width: "999✓ 999✗". */
+const TESTS_W = 9
+/** The time column's width: "23:59". */
+const TIME_W = 5
+const clock = (at: number) => sentLabel(at).slice(5)
 /** The column separator: much fainter than dim, barely there on the dark background. */
 const FAINT = '#3a3a3a'
 
@@ -542,62 +545,73 @@ export function twoLines(s: string, w: number): [string, string?] {
 const IN = (n: number) => ' '.repeat(n)
 
 /**
- * One thread as rows, each its own line: the head (glyph, name, then the meta columns at `widths`), the plan
- * (folded to "Plan · N steps" unless current), every task (or with no tasks, the last 3 things done: edits,
- * test runs, commits, helpers), the later prompts (`› <prompt> · 12:07`, the last 3, up to 2 rows each), then
- * `❯ <activeForm>…` of the running task. So the newest is lowest, in view when the band opens at the bottom.
+ * One timeline row: the text on the left, cut with "…" at the first ┊, then the tests and time columns, kept on
+ * every row at fixed widths so no text runs under them and every ┊ lines up top to bottom.
  */
-function threadBlock(els: Els, o: Observed, t: Thread, widths: number[], cols: number): JSX.Element[] {
-  const { Box, Text } = els
+function row({ Box, Text }: Els, testsW: number, left: JSX.Element, tests: Part[] = [], at?: number): JSX.Element {
+  const cell = (w: number, parts: Part[]) => (
+    <Box width={w + 3} flexShrink={0}>
+      <Text wrap="truncate-end"><Text color={FAINT}>{' ┊ '}</Text>{' '.repeat(Math.max(0, w - lenOf(parts)))}{parts.map(([s, c]) => <Text color={c} dimColor={!c}>{s}</Text>)}</Text>
+    </Box>
+  )
+  return (
+    <Box flexDirection="row">
+      <Box flexGrow={1} flexShrink={1} minWidth={0}>{left}</Box>
+      {cell(testsW, tests)}
+      {cell(TIME_W, at === undefined ? [] : [[clock(at)]])}
+    </Box>
+  )
+}
+
+/**
+ * One thread as rows, each its own line: the head (glyph, name; its last test run and sent time in the columns),
+ * the plan (folded to "Plan · N steps" unless current), every task (or with no tasks, the last 3 things done:
+ * edits, test runs, commits, helpers, each with its time), the later prompts (`› <prompt>`, the last 3, up to 2
+ * rows each), then `❯ <activeForm>…` of the running task. So the newest is lowest, in view when the band opens.
+ */
+function threadBlock(els: Els, o: Observed, t: Thread, testsW: number, cols: number): JSX.Element[] {
+  const { Text } = els
+  const R = (left: JSX.Element, tests?: Part[], at?: number) => row(els, testsW, left, tests, at)
   const isNow = t.id === o.current
   const steps = (t.plan ?? []).filter(s => s.mark !== '#' && s.depth === 0).length
   const [g, tone] = headGlyph(o, t)
-  const meta = metaOf(o, t)
-  const lead = (
-    <Box flexDirection="row">
-      {/* The name takes the columns left of the first meta cell and is cut there; it never pushes a cell. */}
-      <Box flexGrow={1} flexShrink={1} minWidth={0}>
-        <Text wrap="truncate-end"><Text color={tone}>{g}</Text> <Text bold color={isNow ? 'suggestion' : undefined}>{nameOf(t)}</Text></Text>
-      </Box>
-      {/* Each cell a fixed box that never shrinks, so "88 pass · 12 fail" never wraps and every ┊ lines up. */}
-      {widths.map((w, i) => w > 0 && (
-        <Box width={w + 3} flexShrink={0}>
-          <Text wrap="truncate-end"><Text color={FAINT}>{' ┊ '}</Text>{' '.repeat(w - lenOf(meta[i]!))}{meta[i]!.map(([s, c]) => <Text color={c} dimColor={!c}>{s}</Text>)}</Text>
-        </Box>
-      ))}
-    </Box>
+  const mine = o.log.filter(a => a.thread === t.id)
+  const lead = R(
+    <Text wrap="truncate-end"><Text color={tone}>{g}</Text> <Text bold color={isNow ? 'suggestion' : undefined}>{nameOf(t)}</Text></Text>,
+    testCell(mine.findLast(a => a.kind === 'test')?.text), t.sentAt,
   )
   const run = running(t)
   const tasks = t.todos.map(d => {
     const [mark, color] = GLYPH[d.status] ?? ['○']
-    return <Text wrap="truncate-end">{IN(2)}<Text color={color}>{mark}</Text> <Text dimColor={d.status === 'completed'}>{d.text}</Text></Text>
+    return R(<Text wrap="truncate-end">{IN(2)}<Text color={color}>{mark}</Text> <Text dimColor={d.status === 'completed'}>{d.text}</Text></Text>)
   })
   let underHeading = false
   const plan = t.plan?.length ? [
-    <Text dimColor wrap="truncate-end">{IN(2)}Plan · {plural(steps, 'step')}</Text>,
+    R(<Text dimColor wrap="truncate-end">{IN(2)}Plan · {plural(steps, 'step')}</Text>),
     ...(isNow ? t.plan.map(s => {
       if (s.mark === '#') {
         underHeading = true
-        return <Text bold dimColor wrap="truncate-end">{IN(4)}{s.text}</Text>
+        return R(<Text bold dimColor wrap="truncate-end">{IN(4)}{s.text}</Text>)
       }
-      return <Text wrap="truncate-end">{IN(4 + 2 * (s.depth + (underHeading ? 1 : 0)))}<Text dimColor>{s.mark}</Text> {s.text}</Text>
+      return R(<Text wrap="truncate-end">{IN(4 + 2 * (s.depth + (underHeading ? 1 : 0)))}<Text dimColor>{s.mark}</Text> {s.text}</Text>)
     }) : []),
   ] : []
-  const mine = o.log.filter(a => a.thread === t.id)
-  const when = (at?: number) => (at === undefined ? '' : ` · ${sentLabel(at).slice(5)}`)
+  // The left area: the band less both columns and the "  › " indent; a prompt wraps inside it.
+  const w = cols - (testsW + 3) - (TIME_W + 3) - 4
   // The first prompt names the thread; each later one gets up to 2 rows, cut at the end of the second.
   const prompts = mine.filter(a => a.kind === 'prompt').slice(1).slice(-3).flatMap(a => {
-    const [one, two] = twoLines(promptLine(a.text), cols - 4 - when(a.at).length)
+    const [one, two] = twoLines(promptLine(a.text), w)
     return [
-      <Text wrap="truncate-end">{IN(2)}<Text dimColor>› </Text>{one}{!two && <Text dimColor>{when(a.at)}</Text>}</Text>,
-      ...(two ? [<Text wrap="truncate-end">{IN(4)}{two}<Text dimColor>{when(a.at)}</Text></Text>] : []),
+      R(<Text wrap="truncate-end">{IN(2)}<Text dimColor>› </Text>{one}</Text>, [], a.at),
+      ...(two ? [R(<Text wrap="truncate-end">{IN(4)}{two}</Text>)] : []),
     ]
   })
   const work = tasks.length ? [] : mine.filter(a => WORK[a.kind]).slice(-3).map(a => {
     const bad = a.kind === 'test' && a.text.startsWith('tests fail')
     const [mark, color] = bad ? ['✗', 'error'] : WORK[a.kind]!
-    const text = a.kind === 'test' ? a.text.replace(/^tests (pass|fail): /, '') : a.text.replace(/^(commit|helper): /, '')
-    return <Text wrap="truncate-end">{IN(2)}<Text color={color} dimColor={!color}>{mark}</Text> <Text dimColor>{text}{when(a.at)}</Text></Text>
+    // A test run's counts go to the tests column, not the text.
+    const text = a.kind === 'test' ? a.text.replace(/^tests (pass|fail): /, '').replace(/: \d+ pass, \d+ fail$/, '') : a.text.replace(/^(commit|helper): /, '')
+    return R(<Text wrap="truncate-end">{IN(2)}<Text color={color} dimColor={!color}>{mark}</Text> <Text dimColor>{text}</Text></Text>, a.kind === 'test' ? testCell(a.text) : [], a.at)
   })
   // Oldest to newest, like the chat: what is live (the latest prompt, the running task) is the lowest row.
   return [
@@ -606,21 +620,19 @@ function threadBlock(els: Els, o: Observed, t: Thread, widths: number[], cols: n
     ...tasks,
     ...work,
     ...prompts,
-    ...(run ? [<Text wrap="truncate-end">{IN(2)}<Text dimColor>❯ </Text><Text color="suggestion">{run.activeForm ?? run.text}…</Text></Text>] : []),
+    ...(run ? [R(<Text wrap="truncate-end">{IN(2)}<Text dimColor>❯ </Text><Text color="suggestion">{run.activeForm ?? run.text}…</Text></Text>)] : []),
   ]
 }
 
 /** Every thread oldest first (the current one last), each its head row then its own rows; `head[i]` is row i's thread head. */
 function timeline(els: Els, o: Observed, cols: number): { rows: JSX.Element[]; head: number[] } {
-  const threads = ordered(o)
-  const metas = threads.map(t => metaOf(o, t))
-  // Each column as wide as its longest cell, so the columns line up down the list; a column empty everywhere drops.
-  const widths = [0, 1, 2].map(i => Math.max(0, ...metas.map(m => lenOf(m[i]!))))
+  // The tests column as wide as its longest cell on any row, so it lines up down the list.
+  const testsW = Math.max(TESTS_W, ...o.log.filter(a => a.kind === 'test').map(a => lenOf(testCell(a.text))))
   const rows: JSX.Element[] = []
   const head: number[] = []
-  for (const t of threads) {
+  for (const t of ordered(o)) {
     const at = rows.length
-    for (const r of threadBlock(els, o, t, widths, cols)) { rows.push(r); head.push(at) }
+    for (const r of threadBlock(els, o, t, testsW, cols)) { rows.push(r); head.push(at) }
   }
   return { rows, head }
 }

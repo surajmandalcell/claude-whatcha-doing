@@ -31,7 +31,7 @@ const ancestors = (o: Observed, id: number): Thread[] => {
 
 /** Text the engine sends as a user turn (a background task's report, a reminder, a local command's echo), not a person's prompt. */
 export const isEngineText = (text: string) =>
-  /^\s*<(task-notification|system-reminder|local-command-[a-z]+|command-(name|message|args)|bash-(input|stdout|stderr))\b/.test(text)
+  /^\s*(<(task-notification|system-reminder|local-command-[a-z]+|command-(name|message|args)|bash-(input|stdout|stderr))\b|This session is being continued from a previous conversation)/.test(text)
 
 /** A background task's report in plain words, from its <summary> tag: `Agent "Cover page" finished`. */
 export function noticeOf(text: string): string | undefined {
@@ -55,9 +55,11 @@ export function dropEngineText(o: Observed): Observed {
     .filter(a => !(a.kind === 'test' && /^tests (pass|fail): (sed|grep|rg|git|cat|ls|head|tail)\b/.test(a.text)))
     .map(a => (a.kind === 'prompt' && noticeOf(a.text) ? { ...a, kind: 'agent' as const, text: noticeOf(a.text)! } : a))
   const threads = o.threads.map(t => {
-    if (!isEngineText(t.title)) return t
+    // The compaction summary is engine text too: its thread keeps its work and takes the next real prompt's name.
+    const summary = /session (is )?being continued from (a )?previous conversation/i.test(`${t.title} ${t.first ?? ''}`)
+    if (!isEngineText(t.title) && !summary) return t
     const p = log.find(a => a.kind === 'prompt' && a.thread === t.id)
-    return { ...t, title: p ? short(titleOf(p.text), 200) : 'Background tasks' }
+    return { ...t, first: p?.text, name: summary ? undefined : t.name, title: p ? short(titleOf(p.text), 200) : summary ? 'Earlier work' : 'Background tasks' }
   })
   return { ...o, log, threads }
 }
@@ -85,7 +87,8 @@ const topicWords = (s: string) => words(s).filter(w => w.length > 2 && !COMMON.h
 const LIST = /^\s*((?:[-*+>]|\d+[.)]|\[[ xX]?\])\s+)+/
 export const unlist = (s: string) => s.replace(LIST, '')
 /** Drops the composer's attachment tags: "[Image #1]", "[Pasted text #2 +40 lines]", "[File #3]". */
-export const untag = (s: string) => s.replace(/\[[A-Z][\w ]* #\d+[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim()
+// Engine wrappers like <pasted_content id="384e"> go; the text inside stays.
+export const untag = (s: string) => s.replace(/\[[A-Z][\w ]* #\d+[^\]]*\]|<\/?[a-z][\w-]*(\s[^<>]*)?>/gi, ' ').replace(/\s+/g, ' ').trim()
 /** A prompt as a sub row shows it: no tags, no list mark, one line. */
 export const promptLine = (s: string) => {
   // Links and absolute paths are noise in a row ("/Users/x/Pictures bruh" reads "Bruh"); so are "wait," and "new thing:".
@@ -143,34 +146,30 @@ export const stamp = (o: Observed, at: number, sent = false): Observed => {
   // The newest log entry is what this event added: it takes the time, for the sub rows' "· 12:07".
   const last = o.log.at(-1)
   if (last && last.at === undefined) o = { ...o, log: [...o.log.slice(0, -1), { ...last, at }] }
-  return setThread(o, o.current, t => ({ ...t, startedAt: t.startedAt ?? at, lastAt: at, sentAt: sent ? at : t.sentAt, resAt: sent ? undefined : t.resAt }))
+  return setThread(o, o.current, t => ({ ...t, startedAt: t.startedAt ?? at, lastAt: at, sentAt: sent ? at : t.sentAt }))
 }
 
-/** The current thread's reply ended at `at`: its "res" cell. */
-export const replied = (o: Observed, at: number): Observed => setThread(o, o.current, t => ({ ...t, resAt: at }))
-
-/** One prompt the owner typed, as the transcript file stamps it: when it was sent and when its turn ended. */
-export type PromptTime = { text: string; at: number; res?: number }
+/** One prompt the owner typed, as the transcript file stamps it. */
+export type PromptTime = { text: string; at: number }
+/** The transcript file's times: each typed prompt's, and when each tool call's result came back, by its id. */
+export type Times = { prompts: PromptTime[]; tools: Record<string, number> }
 const key = (s: string) => s.replace(/\s+/g, ' ').trim().slice(0, 60)
 
-/**
- * The times of each typed prompt in a transcript .jsonl (any tail of it; a cut first line is skipped):
- * the user line's `timestamp`, and the last `end_turn` reply before the next prompt.
- */
-export function transcriptTimes(jsonl: string): PromptTime[] {
-  const out: PromptTime[] = []
+/** The `timestamp` of each prompt and tool result in a transcript .jsonl (any tail of it; a cut first line is skipped). */
+export function transcriptTimes(jsonl: string): Times {
+  const out: Times = { prompts: [], tools: {} }
   for (const line of jsonl.split('\n')) {
-    let j: { type?: string; isMeta?: boolean; timestamp?: string; message?: { content?: unknown; stop_reason?: string } }
+    let j: { type?: string; isMeta?: boolean; timestamp?: string; message?: { content?: unknown } }
     try { j = JSON.parse(line) } catch { continue }
     const at = Date.parse(j.timestamp ?? '')
-    if (Number.isNaN(at)) continue
-    if (j.type === 'assistant' && j.message?.stop_reason === 'end_turn' && out.length) out.at(-1)!.res = at
-    if (j.type !== 'user' || j.isMeta) continue
+    if (Number.isNaN(at) || j.type !== 'user' || j.isMeta) continue
     const c = j.message?.content
-    const blocks = typeof c === 'string' ? [{ type: 'text', text: c }] : Array.isArray(c) ? (c as { type?: string; text?: string }[]) : []
-    if (!blocks.length || blocks.some(b => b.type === 'tool_result')) continue
+    const blocks = typeof c === 'string' ? [{ type: 'text', text: c }] : Array.isArray(c) ? (c as { type?: string; text?: string; tool_use_id?: string }[]) : []
+    const results = blocks.filter(b => b.type === 'tool_result')
+    for (const b of results) if (b.tool_use_id) out.tools[b.tool_use_id] = at
+    if (results.length) continue
     const text = blocks.filter(b => b.type === 'text').map(b => b.text ?? '').join('\n')
-    if (text.trim()) out.push({ text: key(text), at })
+    if (text.trim()) out.prompts.push({ text: key(text), at })
   }
   return out
 }
@@ -399,7 +398,7 @@ export const demoObserved = (now: number): Observed => ({
     {
       id: 1, title: 'Fix checkout tax rounding', state: 'paused',
       prompt: 'the tax on a $10 mug shows $0.82, it should be $0.83. fix the rounding in src/checkout/tax.ts and run the tests',
-      startedAt: now - 130 * MIN, sentAt: now - 130 * MIN, lastAt: now - 25 * MIN, resAt: now - 25 * MIN,
+      startedAt: now - 130 * MIN, sentAt: now - 130 * MIN, lastAt: now - 25 * MIN,
       todos: [
         { text: 'Round tax per line to the cent', status: 'completed' },
         { text: 'Fix the two failing tax tests', status: 'in_progress', activeForm: 'Fixing the two failing tax tests' },
@@ -410,12 +409,12 @@ export const demoObserved = (now: number): Observed => ({
     {
       id: 2, title: 'Why is CI red?', parent: 1, state: 'answered', todos: [], files: [],
       prompt: 'wait, why is CI red on main since this morning? just look, short answer',
-      startedAt: now - 110 * MIN, sentAt: now - 110 * MIN, lastAt: now - 100 * MIN, resAt: now - 100 * MIN,
+      startedAt: now - 110 * MIN, sentAt: now - 110 * MIN, lastAt: now - 100 * MIN,
     },
     {
       id: 3, title: 'Bump Node 20 to 22 in CI', parent: 2, state: 'done',
       prompt: 'ok bump Node 20 to 22 in the CI workflow and .nvmrc, then commit',
-      startedAt: now - 95 * MIN, sentAt: now - 95 * MIN, lastAt: now - 80 * MIN, resAt: now - 80 * MIN,
+      startedAt: now - 95 * MIN, sentAt: now - 95 * MIN, lastAt: now - 80 * MIN,
       todos: [{ text: 'Use Node 22 in the CI workflow', status: 'completed' }],
       files: ['.github/workflows/ci.yml', '.nvmrc', 'package.json'],
     },

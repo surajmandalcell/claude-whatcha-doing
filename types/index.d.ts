@@ -25,8 +25,6 @@ export type Thread = {
   lastAt?: number
   /** When the owner last sent a prompt to this thread (ms), shown as "sent 10:42". */
   sentAt?: number
-  /** When Claude's reply to that prompt finished (ms), shown as "res 10:49"; absent while it works. */
-  resAt?: number
 }
 export type Activity = {
   kind: 'prompt' | 'return' | 'edit' | 'test' | 'error' | 'agent' | 'todo' | 'commit'
