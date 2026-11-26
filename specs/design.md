@@ -84,9 +84,10 @@ All looks are settled. Nothing is open.
      moves. Every older prompt is one row, cut at the ┊.
      **Turns**: prompts sent before Claude replies stack as `›` rows. When Claude replies (`turn.complete`
      with an answer; in a rebuild, the next prompt), one dim result line goes under the stack at col 4:
-     `⎿ 18 tests passed · 3 files changed · 1 commit · 1 helper started`, counting the work since the first
-     prompt of the turn, in words, never a command or a path. The last test run is green (`N tests
-     passed`) or red (`N tests failed`); parts with nothing to count drop; no work, no line. The reply is
+     `⎿ 3 files changed · 1 commit · 1 helper started · took 2m 11s`, counting the work since the first
+     prompt of the turn, in words, never a command or a path; "took" runs from that prompt to the last
+     work. Parts with nothing to count drop; no work, no line. Tests never go in it: the tests column
+     shows each turn's last test run on the row of its last prompt (the head row: the first turn's). The reply is
      a `reply` log entry, so a rebuild draws the same rows;
   5. col 2: `❯ <activeForm>…` of the running task (accent), word for word from TaskCreate or TodoWrite,
      the lowest row, like the chat's spinner.

@@ -718,25 +718,28 @@ const clock = (at: number) => sentLabel(at).slice(5)
 const FAINT = '#3a3a3a'
 
 /**
- * A turn's result line in words, never a command or a path: "18 tests passed" (green; a failed run red), then
- * "3 files changed", "1 commit", "1 helper started" (dim). Empty when the turn did none of these.
+ * A turn's result line in words, never a command or a path: "3 files changed · 1 commit · 1 helper started · took
+ * 2m 11s" (dim). Empty when the turn did none of these. Tests are in the tests column, not here.
  */
-export function resultLine(work: Activity[]): Part[] {
+export function resultLine(work: Activity[], from?: number): Part[] {
+  // Tests stay out: the tests column on the turn's prompt row already shows them.
   const out: Part[] = []
-  const test = work.findLast(a => a.kind === 'test')
-  if (test) {
-    const bad = test.text.startsWith('tests fail')
-    const m = test.text.match(/(\d+) pass, (\d+) fail/)
-    const n = m ? Number(bad ? m[2] : m[1]) : 0
-    out.push([`${n ? plural(n, 'test') : 'tests'} ${bad ? 'failed' : 'passed'}`, bad ? 'error' : 'success'])
-  }
   const files = new Set(work.filter(a => a.kind === 'edit').map(a => a.text)).size
   const commits = work.filter(a => a.kind === 'commit').length
   const helpers = work.filter(a => a.kind === 'agent' && a.text.startsWith('helper: ')).length
   if (files) out.push([`${plural(files, 'file')} changed`])
   if (commits) out.push([plural(commits, 'commit')])
   if (helpers) out.push([`${plural(helpers, 'helper')} started`])
+  // How long the turn ran: its first prompt to its last stamped work, like the chat's "Baked for 2m 11s".
+  const to = work.findLast(a => a.at !== undefined)?.at
+  if (out.length && from !== undefined && to !== undefined && to - from >= 1000) out.push([`took ${took(to - from)}`])
   return out.flatMap((p, i) => (i ? [[' · '] as Part, p] : [p]))
+}
+
+/** 45s, 2m 11s, 1h 5m. */
+const took = (ms: number) => {
+  const s = Math.round(ms / 1000), m = Math.floor(s / 60), h = Math.floor(m / 60)
+  return h ? `${h}h ${m % 60}m` : m ? (s % 60 ? `${m}m ${s % 60}s` : `${m}m`) : `${s}s`
 }
 
 /** Text in at most 2 lines of `w` columns, broken at a word; the second line ends in "…" when more is left. */
@@ -773,7 +776,7 @@ function row({ Box, Text }: Els, testsW: number, left: JSX.Element, redo?: JSX.E
 }
 
 /**
- * One thread as rows, each its own line: the head (glyph, name; ↻, its last test run and sent time in the columns),
+ * One thread as rows, each its own line: the head (glyph, name; ↻, its turn's last test run and sent time in the columns),
  * the plan (folded to "Plan · N steps" unless current), every task, the later prompts (`› <prompt>`, the last 3) with
  * a dim `⎿ <result>` line under each turn Claude replied to, then `❯ <activeForm>…` of the running task. Prompts sent
  * before the reply stack, and their one result line covers the work since the first of them. Only the newest prompt
@@ -810,12 +813,25 @@ function threadBlock(els: Els, o: Observed, t: Thread, testsW: number, cols: num
       </Button>
     )
   }
+  // Turns: the prompts sent before Claude's reply stack in one; its work is everything done after the first of them.
+  type Turn = { prompts: Activity[]; work: Activity[]; isReplied: boolean }
+  const turns: Turn[] = []
+  for (const a of mine) {
+    const now = turns.at(-1)
+    if (a.kind === 'prompt') now && !now.isReplied ? now.prompts.push(a) : turns.push({ prompts: [a], work: [], isReplied: false })
+    else if (a.kind === 'reply') { if (now) now.isReplied = true }
+    else now?.work.push(a)
+  }
+  // The tests column: each turn's last test run, on the row of its last prompt (the head: the first turn's).
+  const testsOf = (a: Activity) => {
+    const x = turns.find(x => x.prompts.at(-1) === a)
+    return x ? testCell(x.work.findLast(w => w.kind === 'test')?.text) : []
+  }
   const first = mine.find(a => a.kind === 'prompt' && (t.first === undefined || a.text === t.first))
   const name = cut(nameOf(t), left - 2)
-  const lastTest = testCell(mine.findLast(a => a.kind === 'test')?.text)
   const lead = first
-    ? R(<Box flexDirection="row"><Box flexShrink={0}><Text color={tone}>{g} </Text></Box>{jump(first, name, left - 2, true, isNow ? 'suggestion' : undefined)}</Box>, first, lastTest, t.sentAt)
-    : R(<Text wrap="truncate-end"><Text color={tone}>{g}</Text> <Text bold color={isNow ? 'suggestion' : undefined}>{name}</Text></Text>, undefined, lastTest, t.sentAt)
+    ? R(<Box flexDirection="row"><Box flexShrink={0}><Text color={tone}>{g} </Text></Box>{jump(first, name, left - 2, true, isNow ? 'suggestion' : undefined)}</Box>, first, testsOf(first), t.sentAt)
+    : R(<Text wrap="truncate-end"><Text color={tone}>{g}</Text> <Text bold color={isNow ? 'suggestion' : undefined}>{name}</Text></Text>, undefined, testCell(mine.findLast(a => a.kind === 'test')?.text), t.sentAt)
   const run = running(t)
   const tasks = t.todos.map(d => {
     const [mark, color] = GLYPH[d.status] ?? ['○']
@@ -837,15 +853,6 @@ function threadBlock(els: Els, o: Observed, t: Thread, testsW: number, cols: num
   // The gist is asked to fit this row, so it lands in the row the spinner held: no row moves.
   gistRoom = Math.max(30, w)
   const newest = o.log.findLast(a => a.kind === 'prompt')
-  // Turns: the prompts sent before Claude's reply stack in one; its work is everything done after the first of them.
-  type Turn = { prompts: Activity[]; work: Activity[]; isReplied: boolean }
-  const turns: Turn[] = []
-  for (const a of mine) {
-    const now = turns.at(-1)
-    if (a.kind === 'prompt') now && !now.isReplied ? now.prompts.push(a) : turns.push({ prompts: [a], work: [], isReplied: false })
-    else if (a.kind === 'reply') { if (now) now.isReplied = true }
-    else now?.work.push(a)
-  }
   const head = turns[0]?.prompts[0]
   // The first prompt names the thread; the last 3 later ones get a row.
   const shown = new Set(turns.flatMap(x => x.prompts).slice(1).slice(-3))
@@ -856,13 +863,13 @@ function threadBlock(els: Els, o: Observed, t: Thread, testsW: number, cols: num
     const text = a.gist || promptLine(a.text)
     const [one, two] = a !== newest || busy ? [cut(text, w)] : twoLines(text, w)
     return [
-      R(<Box flexDirection="row"><Box flexShrink={0}><Text>{IN(2)}<Text dimColor>› </Text></Text></Box>{jump(a, one, w)}</Box>, a, [], a.at),
+      R(<Box flexDirection="row"><Box flexShrink={0}><Text>{IN(2)}<Text dimColor>› </Text></Text></Box>{jump(a, one, w)}</Box>, a, testsOf(a), a.at),
       ...(two ? [R(<Text wrap="truncate-end">{IN(4)}{two}</Text>)] : []),
     ]
   }
   // Under each turn Claude replied to, one dim result line; none while it works, or when the turn did nothing.
   const flow = turns.flatMap(x => {
-    const said = x.isReplied && (x.prompts.at(-1) === head || shown.has(x.prompts.at(-1)!)) ? resultLine(x.work) : []
+    const said = x.isReplied && (x.prompts.at(-1) === head || shown.has(x.prompts.at(-1)!)) ? resultLine(x.work, x.prompts[0]!.at) : []
     return [
       ...x.prompts.filter(a => shown.has(a)).flatMap(promptRows),
       ...(said.length ? [R(<Text wrap="truncate-end">{IN(4)}<Text dimColor>⎿ </Text>{said.map(([s, c]) => <Text color={c} dimColor={!c}>{s}</Text>)}</Text>, undefined, [], x.work.findLast(a => a.at !== undefined)?.at)] : []),
