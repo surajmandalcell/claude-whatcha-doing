@@ -79,7 +79,7 @@ async function load(r: Reads): Promise<Data> {
 
 // shortcut: the last drawn timeline's scroll room, for the wheel hook; one band per process, keep per session if that changes.
 let roomNow = 0
-// shortcut: the `›` row's text width at the last draw (60 before one), for the gist's length; per session if bands multiply.
+// shortcut: the `›` row's text width at the last draw of the band, any tab or size (60 before one), for the gist's length; per session if bands multiply.
 let gistRoom = 60
 
 export const register: Register = (on, options) => {
@@ -281,6 +281,8 @@ export const register: Register = (on, options) => {
     }
 
     const { o, cache, tab } = d
+    // Every draw, not only the Threads tab's: a gist asked while Threads is hidden still fills its row.
+    gistRoom = Math.max(30, cols - (REDO_W + 3) - (testsWOf(o) + 3) - (TIME_W + 3) - 4)
     const now = byId(o, o.current)
     const over = o.threads.filter(isOver).length
     const isOpen = b.mode === 'expanded' || b.mode === 'compact'
@@ -708,6 +710,8 @@ export function testCell(text = ''): Part[] {
 const lenOf = (c: Part[]) => c.reduce((a, [s]) => a + [...s].length, 0)
 /** The tests column's least width: "18 ✓ Pass"; a wider cell widens it. */
 const TESTS_W = 9
+// The tests column as wide as its longest cell on any row, so it lines up down the list.
+const testsWOf = (o: Observed) => Math.max(TESTS_W, ...o.log.filter(a => a.kind === 'test').map(a => lenOf(testCell(a.text))))
 
 /** The refresh column's width: " ↻ ". */
 const REDO_W = 3
@@ -850,8 +854,6 @@ function threadBlock(els: Els, o: Observed, t: Thread, testsW: number, cols: num
   ] : []
   // The left area less the "  › " indent; the newest prompt wraps inside it.
   const w = left - 4
-  // The gist is asked to fit this row, so it lands in the row the spinner held: no row moves.
-  gistRoom = Math.max(30, w)
   const newest = o.log.findLast(a => a.kind === 'prompt')
   const head = turns[0]?.prompts[0]
   // The first prompt names the thread; the last 3 later ones get a row.
@@ -887,8 +889,7 @@ function threadBlock(els: Els, o: Observed, t: Thread, testsW: number, cols: num
 
 /** Every thread oldest first (the current one last), each its head row then its own rows; `head[i]` is row i's thread head. */
 function timeline(els: Els, o: Observed, cols: number, act: Acts): { rows: JSX.Element[]; head: number[] } {
-  // The tests column as wide as its longest cell on any row, so it lines up down the list.
-  const testsW = Math.max(TESTS_W, ...o.log.filter(a => a.kind === 'test').map(a => lenOf(testCell(a.text))))
+  const testsW = testsWOf(o)
   const rows: JSX.Element[] = []
   const head: number[] = []
   for (const t of ordered(o)) {

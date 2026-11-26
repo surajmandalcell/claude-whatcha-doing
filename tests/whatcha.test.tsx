@@ -1120,3 +1120,24 @@ test('gist length follows the band and the prompt: a long prompt fills the row, 
   expect(promptSum(reply, 'long prompt text here', 11, 70)).toBe(reply)
   expect(promptSum(reply, 'long prompt text here', 11, 20)).toBeUndefined()
 })
+
+test('a gist asked while Threads is hidden still gets the wide row: the band measures it on every tab', async ($, on) => {
+  engine(on)
+  const systems: string[] = []
+  on('fs.read', () => ({ value: 'swift source' }))
+  on('fs.exists', () => ({ value: true }))
+  on('process.run', async (_, e) => {
+    if (e.argv[0]!.includes('ondevice-')) systems.push((JSON.parse(String(e.init?.stdin)) as { system: string }).system)
+    return { value: { exitCode: 0, stdout: 'Fix header numbers, divider color options, more red shades, box borders', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  resetOnDevice()
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount(BAND(50, 160))
+  await ui.press({ key: 'tab-artifacts' })
+  await ui.drawn()
+  await $.prompt.submit({ text: 'fix the header numbers and give divider color options and more shades of red and fix the box borders '.repeat(3), wait: false, origin: { kind: 'composer' } } as never)
+  await new Promise(r => setTimeout(r, 20))
+  await ui.unmount()
+  // 160 columns less the 3 meta columns: about 17 words, not the 8 of the 60-column default.
+  expect(systems.find(s => s.startsWith('Summarize'))).toContain('about 17 words')
+})

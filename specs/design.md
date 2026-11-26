@@ -107,7 +107,7 @@ All looks are settled. Nothing is open.
   (`these`, `it`, `its`, `the`, `to`), is dropped; the title from the prompt's first whole clause then
   stands in ("where are these? the rule files" reads `Rule files`).
 - **Prompt gists**: a prompt of 40 characters or more (after cleaning) goes to the on-device model
-  with "one line of about N words (about C characters), like a detailed commit subject that keeps the key details" (C: the `›` row's text width at the last draw; N: the smaller of C / 7 and a third of the prompt's words, 6 to 18; a target, because given a range the model stays at its low end), one call at a time in the background, never on
+  with "one line of about N words (about C characters), like a detailed commit subject that keeps the key details" (C: the `›` row's text width at the band's last draw, in any tab or size, so a gist asked while Threads is hidden or collapsed still fills its row; N: the smaller of C / 7 and a third of the prompt's words, 6 to 18; a target, because given a range the model stays at its low end), one call at a time in the background, never on
   redraw. A just-sent prompt goes first in line, ahead of the load queue (the newest 20 long prompts
   without one; older ones show as typed). The full prompt is sent, cut to 4000 characters (about 1000 of
   the model's 4096 tokens, about 8 s), never skipped. A reply under 3 or over 9 words (never cut), ending
