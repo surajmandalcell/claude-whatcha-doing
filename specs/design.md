@@ -79,8 +79,9 @@ All looks are settled. Nothing is open.
      model sums it up: `⠹ summarizing…` in Claude blue (`claude`), after a miss `⠹ retrying, try N of 3`
      (`warning`), then the prompt as typed, dim, on the same row; the spinner turns every 120 ms, only
      while some prompt waits. Then the gist, else the prompt. Only the newest prompt of the whole timeline
-     takes 2 rows, wrapped inside the left area, cut with "…" at the end of the second; while it waits,
-     the spinner line, then the prompt as typed, dim. Every older prompt is one row, cut at the ┊.
+     takes 2 rows, wrapped inside the left area, cut with "…" at the end of the second; while it waits it
+     is one row, like any other, and the gist (asked to fit the row) fills that row in place, so no row
+     moves. Every older prompt is one row, cut at the ┊.
      **Turns**: prompts sent before Claude replies stack as `›` rows. When Claude replies (`turn.complete`
      with an answer; in a rebuild, the next prompt), one dim result line goes under the stack at col 4:
      `⎿ 18 tests passed · 3 files changed · 1 commit · 1 helper started`, counting the work since the first

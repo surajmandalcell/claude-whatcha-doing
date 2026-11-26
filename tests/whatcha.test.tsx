@@ -655,7 +655,8 @@ test('a new long prompt gets its gist with no toggle: "…" while the model runs
   await prompt('fix the gist band for new prompts')
   await prompt(dictated)
   // Before the model answers: the spinner line, then the prompt as typed (dim), and the spinner on the status row.
-  expect((await draw(150, 'size-compact')).slice(-2)).toEqual([expect.stringMatching(/^  › \S summarizing… +┊/), expect.stringMatching(/^    The gist band often shows nothing/)])
+  // One row, filled in place by the gist: no row moves.
+  expect((await draw(150, 'size-compact')).slice(-2)).toEqual([expect.stringMatching(/^▸ /), expect.stringMatching(/^  › \S summarizing…  The gist band often shows nothing.*… ┊/)])
   expect((await draw(100))[0]).toMatch(/^▸ Now \(0\/1\): \S summarizing…$/)
   open()
   await settle()
@@ -794,8 +795,8 @@ test('no answer: the spinner, "retrying, try 1 of 3" after a miss, asked again a
   const long = 'the band gist sometimes never shows up for a prompt and stays raw, find out why and retry it'
   await prompt(long)
   await settle()
-  // A miss: the spinner says which try, then the prompt as typed (dim) on the row under it.
-  expect(await lastRows(2)).toEqual([expect.stringMatching(/^  › \S retrying, try 1 of 3$/), '    The band gist sometimes never shows up for a prompt and stays raw, find out why and retry it'])
+  // A miss: the spinner says which try, then the prompt as typed (dim), on the one row the gist will take.
+  expect(await lastRows(2)).toEqual([expect.stringMatching(/^▸ Fix the band please/), expect.stringMatching(/^  › \S retrying, try 1 of 3  The band gist sometimes never shows up for a prompt and stays raw, find out why and retry it$/)])
   await m.clock.advance(5_000)
   await settle()
   expect(await last()).toBe('  › Fix the band gist retry')

@@ -238,8 +238,6 @@ export const register: Register = (on, options) => {
       tick: () => { const t = $.clock.every(1000, () => $.ui.invalidate('ui.render')); return () => t.cancel() },
     }
     const cols = e.props.bodyColumns
-    // The `›` row's text: the band less the ↻, tests and time columns and the "  › " indent.
-    gistRoom = Math.max(30, cols - (REDO_W + 3) - (TESTS_W + 3) - (TIME_W + 3) - 4)
     const width = e.surface === 'terminal' ? cols : undefined
     const stack = (mine: NonNullable<typeof below>) => (below ? <Box flexDirection="column">{mine}{below}</Box> : mine)
     const setView = (v: Partial<Band>) => update($, band, (x): Band => ({ ...x, ...v })).then(() => saveView($))
@@ -836,6 +834,8 @@ function threadBlock(els: Els, o: Observed, t: Thread, testsW: number, cols: num
   ] : []
   // The left area less the "  › " indent; the newest prompt wraps inside it.
   const w = left - 4
+  // The gist is asked to fit this row, so it lands in the row the spinner held: no row moves.
+  gistRoom = Math.max(30, w)
   const newest = o.log.findLast(a => a.kind === 'prompt')
   // Turns: the prompts sent before Claude's reply stack in one; its work is everything done after the first of them.
   type Turn = { prompts: Activity[]; work: Activity[]; isReplied: boolean }
@@ -849,15 +849,15 @@ function threadBlock(els: Els, o: Observed, t: Thread, testsW: number, cols: num
   const head = turns[0]?.prompts[0]
   // The first prompt names the thread; the last 3 later ones get a row.
   const shown = new Set(turns.flatMap(x => x.prompts).slice(1).slice(-3))
-  // Each prompt row shows the model's gist, else the prompt; the newest wraps to 2 rows (busy: the spinner, then the
-  // prompt as typed, dim), each older one is cut at the first ┊.
+  // Each prompt row shows the model's gist, else the prompt; the newest wraps to 2 rows, each older one is cut at
+  // the first ┊. Busy: one row, the spinner then the prompt dim, the same one row the gist then fills in place.
   const promptRows = (a: Activity) => {
     const busy = isBusy(a)
     const text = a.gist || promptLine(a.text)
-    const [one, two] = a !== newest ? [cut(text, w)] : busy ? ['', cut(promptLine(a.text), w)] : twoLines(text, w)
+    const [one, two] = a !== newest || busy ? [cut(text, w)] : twoLines(text, w)
     return [
-      R(<Box flexDirection="row"><Box flexShrink={0}><Text>{IN(2)}<Text dimColor>› </Text></Text></Box>{jump(a, one, a === newest ? 0 : w)}</Box>, a, [], a.at),
-      ...(two ? [R(<Text dimColor={busy} wrap="truncate-end">{IN(4)}{two}</Text>)] : []),
+      R(<Box flexDirection="row"><Box flexShrink={0}><Text>{IN(2)}<Text dimColor>› </Text></Text></Box>{jump(a, one, w)}</Box>, a, [], a.at),
+      ...(two ? [R(<Text wrap="truncate-end">{IN(4)}{two}</Text>)] : []),
     ]
   }
   // Under each turn Claude replied to, one dim result line; none while it works, or when the turn did nothing.
