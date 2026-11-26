@@ -1,6 +1,7 @@
 // Short lines from Apple's on-device model (FoundationModels, macOS 26+), via helper/ondevice.swift.
 // The helper compiles on first use with the Command Line Tools' swiftc and is reused after.
-// Any missing piece (no tools, old macOS, Apple Intelligence off) answers undefined.
+// Any missing piece (no tools, old macOS, Apple Intelligence off) answers null: the model can never answer here.
+// A one-off miss (a failed request, the timeout) answers undefined: asking again later may work.
 import type { EngineInterface } from 'claude-code'
 
 type Host = Pick<EngineInterface, 'process' | 'fs' | 'env' | 'plugin'>
@@ -32,15 +33,16 @@ async function build($: Host): Promise<string | undefined> {
   }
 }
 
-export async function onDevice($: Host, system: string, text: string): Promise<string | undefined> {
+export async function onDevice($: Host, system: string, text: string): Promise<string | null | undefined> {
   const key = system + '\0' + text
   const hit = replies.get(key)
-  if (hit !== undefined || off) return hit
+  if (hit !== undefined) return hit
+  if (off) return null
   const bin = await (helper ??= build($))
-  if (!bin) return undefined
+  if (!bin) return null
   try {
     const r = await $.process.run([bin], { stdin: JSON.stringify({ system, text }), timeoutMs: 15_000 })
-    if (r.exitCode === 2) off = true
+    if (r.exitCode === 2) return (off = true), null
     const reply = r.stdout.trim()
     if (r.exitCode !== 0 || !reply) return undefined
     if (replies.size >= 100) replies.delete(replies.keys().next().value!)

@@ -36,6 +36,8 @@ export type Activity = {
   gist?: string
   /** The newest prompt's 3-6 word gist for the S row. */
   brief?: string
+  /** The on-device model never answered (error or timeout, after the retries): gist is '' and the next session asks again. */
+  failed?: boolean
   /** When it happened (ms); absent on entries rebuilt from the transcript. */
   at?: number
 }

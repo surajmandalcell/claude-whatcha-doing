@@ -153,7 +153,8 @@ export const stamp = (o: Observed, at: number, sent = false): Observed => {
 export type PromptTime = { text: string; at: number }
 /** The transcript file's times: each typed prompt's, and when each tool call's result came back, by its id. */
 export type Times = { prompts: PromptTime[]; tools: Record<string, number> }
-const key = (s: string) => s.replace(/\s+/g, ' ').trim().slice(0, 60)
+/** A prompt's match key: its first 60 chars, spaces collapsed (transcript times, chat rows). */
+export const key = (s: string) => s.replace(/\s+/g, ' ').trim().slice(0, 60)
 
 /** The `timestamp` of each prompt and tool result in a transcript .jsonl (any tail of it; a cut first line is skipped). */
 export function transcriptTimes(jsonl: string): Times {
@@ -215,7 +216,8 @@ export function onTurnEnd(o: Observed, isAnswered: boolean): Observed {
 }
 
 export function onEdit(o: Observed, path: string): Observed {
-  if (!cur(o)) o = open(o, `Edit ${base(path)}`)
+  // A thread opened by an edit is named in words, never by the file.
+  if (!cur(o)) o = open(o, 'Edited files')
   if (!cur(o)!.files.includes(path)) o = setThread(o, o.current, t => ({ ...t, files: [...t.files, path] }))
   return log(o, 'edit', base(path))
 }
@@ -269,8 +271,11 @@ export function isQuietExit(cmd: string, text: string): boolean {
   return code?.trim() === 'Exit code 1' && QUIET.has(last) && !/error|no such file|not found|denied|fatal|usage:|invalid|unrecognized/i.test(out.join('\n'))
 }
 export const onAgent = (o: Observed, what: string) => log(o, 'agent', `helper: ${short(what, 200)}`)
-/** `git commit -m "msg"`: the message, else the command. */
-export const onCommit = (o: Observed, cmd: string) => log(o, 'commit', `commit: ${short(cmd.match(/-m\s+(["'])(.*?)\1/)?.[2] ?? cmd, 200)}`)
+/** The commit message's first line (a heredoc's, else `-m "msg"`'s), never the command: `commit: msg`, or `commit`. */
+export function onCommit(o: Observed, cmd: string): Observed {
+  const msg = cmd.match(/<<-?\s*['"]?\w+['"]?[^\n]*\n\s*([^\n]+)/)?.[1] ?? cmd.match(/-m\s+(["'])(.*?)\1/)?.[2]
+  return log(o, 'commit', msg && !msg.startsWith('$(') ? `commit: ${short(msg, 200)}` : 'commit')
+}
 // The tool word must stand alone as a command word, so a path such as tests/tax.test.ts is not a test run.
 // `test` counts only as another tool's argument (npm test, claude plugin test .), never the shell's own `test -f x`.
 export const isTestCommand = (cmd: string) =>
@@ -349,10 +354,13 @@ export function promptSum(reply: string | undefined, prompt: string, most = 9): 
   if (echo(promptLine(prompt)).startsWith(echo(s))) return undefined
   return s[0]!.toUpperCase() + s.slice(1)
 }
-/** Caches the gist ('' when the model gave none) and the S row's brief on every log entry of this prompt, and on the thread it opened. */
-export const setSum = (o: Observed, text: string, gist: string, brief?: string): Observed => ({
+/**
+ * Caches the gist ('' when the model gave none) and the S row's brief on every log entry of this prompt, and on the
+ * thread it opened. `failed`: the model never answered, so the next session asks again.
+ */
+export const setSum = (o: Observed, text: string, gist: string, brief?: string, failed?: boolean): Observed => ({
   ...o,
-  log: o.log.map(a => (a.kind === 'prompt' && a.text === text ? { ...a, gist, ...(brief ? { brief } : {}) } : a)),
+  log: o.log.map(a => (a.kind === 'prompt' && a.text === text ? { ...a, gist, ...(brief ? { brief } : {}), failed: failed || undefined } : a)),
   threads: o.threads.map(t => (t.first === text ? { ...t, gist } : t)),
 })
 

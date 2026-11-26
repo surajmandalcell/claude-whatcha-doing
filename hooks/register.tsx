@@ -1,11 +1,11 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Register, SessionMessage, ToolCallInput, ToolCallResult } from 'claude-code'
 
-import type { ArtifactRow, Artifacts, Band, Observed, Summary, SummaryCache, Tab, Thread, Todo } from '../types'
+import type { Activity, ArtifactRow, Artifacts, Band, Observed, Summary, SummaryCache, Tab, Thread, Todo } from '../types'
 import {
   demoArtifacts, demoObserved, demoSummary, sortSummary, touchTodos, emptyObserved, hash, isTestCommand, onAgent, onArtifact, onCommit, onEdit,
   dropEngineText, isEngineText, clearErrors, isQuietExit, noticeOf, promptLine, untag, onNotice, onError, onPlan, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, sentLabel, short, stamp, timeOf, transcriptTimes, type Times, unlist, testResult, SUMMARY_SYSTEM, summaryInput,
-  summaryPrompt, SUMMARY_OUT, NAME_SYSTEM, threadName, SUM_SYSTEM, BRIEF_SYSTEM, isPending, promptSum, setSum,
+  summaryPrompt, SUMMARY_OUT, NAME_SYSTEM, threadName, SUM_SYSTEM, BRIEF_SYSTEM, isPending, promptSum, setSum, key as promptKey,
 } from './observe'
 import { onDevice } from './ondevice'
 
@@ -110,9 +110,16 @@ export const register: Register = (on, options) => {
     }
     // Rebuilt or older long prompts get their one-line summary in the background, newest first (the newest
     // with its S row brief); ones past the cap show as typed instead of waiting on "…" forever.
-    const owed = (await read($, observed)).log.filter(a => a.kind === 'prompt' && isPending(a)).reverse()
-    const late = new Set(owed.slice(LOAD_SUMS).map(a => a.text))
-    if (late.size) await update($, observed, o => ({ ...o, log: o.log.map(a => (a.kind === 'prompt' && late.has(a.text) ? { ...a, gist: '' } : a)) })).catch(() => {})
+    // Ones the model never answered last time (`failed`) are asked again, inside the same cap.
+    const owed = (await read($, observed)).log.filter(a => a.kind === 'prompt' && (isPending(a) || a.failed)).reverse()
+    const late = new Set(owed.slice(LOAD_SUMS).filter(isPending).map(a => a.text))
+    const again = new Set(owed.slice(0, LOAD_SUMS).filter(a => a.failed).map(a => a.text))
+    if (late.size || again.size) {
+      await update($, observed, o => ({
+        ...o,
+        log: o.log.map(a => (a.kind !== 'prompt' ? a : late.has(a.text) ? { ...a, gist: '' } : again.has(a.text) ? { ...a, gist: undefined, failed: undefined } : a)),
+      })).catch(() => {})
+    }
     summarize($, owed.slice(0, 1), true)
     summarize($, owed.slice(1, LOAD_SUMS))
     // The view (size, 🤖/👤, tab) outlives the session: one for all, or one per project folder that starts from the global one.
@@ -159,7 +166,7 @@ export const register: Register = (on, options) => {
       const t = byId(o, o.current)
       if (!notice && t && !t.name && o.log.filter(a => a.kind === 'prompt' && a.thread === t.id).length === 1) {
         void ask($, NAME_SYSTEM, e.text)
-          .then(r => threadName(r))
+          .then(r => threadName(r ?? undefined))
           .then(name => name === undefined ? undefined : update($, observed, x => ({ ...x, threads: x.threads.map(y => (y.id === t.id ? { ...y, name } : y)) })))
           .catch(() => {})
       }
@@ -244,6 +251,13 @@ export const register: Register = (on, options) => {
       all: () => showAll(true),
       less: b.all ? () => showAll(false) : undefined,
       copy: (url, surface) => $.ui.copy({ text: url, surface }).then(r => r.isCopied && $.ui.toast(`Copied ${url}`)),
+      tldr: text => redo($, text),
+      jump: async text => {
+        // A press is the person's own input: the engine lets it scroll the transcript to that prompt's row.
+        const requestId = drawnAt.get(promptKey(text))
+        const r = requestId ? await $.ui.scroll({ to: { requestId }, block: 'start' }).catch(() => ({ deny: 'failed' })) : undefined
+        if (!r || r.deny) await $.ui.toast('That prompt is not drawn in the chat yet')
+      },
     }
 
     if (b.mode === 'min') {
@@ -268,7 +282,7 @@ export const register: Register = (on, options) => {
     const mRows = Math.max(1, Math.min(COMPACT_ROWS, e.props.maxRows - (isNarrow ? 3 : 2)))
     // The timeline window: oldest at the top, newest at the bottom; it opens on the newest (back 0).
     const shown = b.mode === 'compact' ? mRows : cap
-    const room = !isOpen || tab !== 'threads' || b.all ? 0 : roomOf(timeline(els, o, cols).rows.length, shown)
+    const room = !isOpen || tab !== 'threads' || b.all ? 0 : roomOf(timeline(els, o, cols, act).rows.length, shown)
     roomNow = room
     const back = Math.min(b.scroll ?? 0, room)
     const off = room - back
@@ -282,11 +296,11 @@ export const register: Register = (on, options) => {
     // 🤖 the latest prompt's 3-6 word brief (else its gist), a dim "…" while the model writes it; 👤 or no gist:
     // the prompt as typed, cleaned; the thread's name only when the prompt was all tags, links or paths.
     const last = now && o.log.findLast(a => a.kind === 'prompt' && a.thread === now.id)
-    const isWaiting = !!last && isPending(last)
+    const isWaiting = !!last && isBusy(last)
     const said = now && ((last && (last.brief || last.gist)) || promptLine(now.prompt ?? '') || nameOf(now))
     const status = (
       <Text wrap="truncate-end">
-        <Text color={tone}>{g}</Text> Now ({over}/{o.threads.length}): {isWaiting ? <Text dimColor>…</Text> : <Text bold>{said || 'waiting for the first prompt'}</Text>}
+        <Text color={tone}>{g}</Text> Now ({over}/{o.threads.length}): {isWaiting ? <Text dimColor>{PROCESSING}</Text> : <Text bold>{said || 'waiting for the first prompt'}</Text>}
       </Text>
     )
     // Groups split by a faint ┊; no gap between buttons, each padded 1 space a side, so the status keeps the room.
@@ -344,6 +358,13 @@ export const register: Register = (on, options) => {
     if (e.component !== 'AbovePrompt' || !roomNow || b.all || !['compact', 'expanded'].includes(b.mode)) return next(e)
     await update($, band, (x): Band => ({ ...x, scroll: Math.max(0, Math.min(roomNow, (x.scroll ?? 0) - e.by)) }))
     return {}
+  }).catch(($, e, next) => next(e))
+
+  // Passive: each prompt row the chat draws, by its text, so a press on a band row can scroll the chat to it.
+  on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
+    if (drawnAt.size >= 500) drawnAt.delete(drawnAt.keys().next().value!)
+    drawnAt.set(promptKey(e.props.text), e.requestId)
+    return next(e)
   }).catch(($, e, next) => next(e))
 
   // Escape hands the keys back and the ring leaves our band: show all goes back to normal.
@@ -444,7 +465,7 @@ async function saveView($: EngineInterface): Promise<void> {
 }
 
 /** One on-device model call (onDevice reads only HOME, the helper source and its binary). */
-function ask($: EngineInterface, system: string, text: string): Promise<string | undefined> {
+function ask($: EngineInterface, system: string, text: string): Promise<string | null | undefined> {
   const host = {
     plugin: { root: $.plugin.root },
     // The engine wants a literal name here; HOME is the only one onDevice reads.
@@ -458,18 +479,32 @@ function ask($: EngineInterface, system: string, text: string): Promise<string |
 
 // One model run at a time, in the background: a summary never blocks a prompt or a redraw.
 // A just-sent prompt goes to the front, so it never waits behind the gists queued at load.
-type SumJob = { key: string; text: string; brief: boolean }
+/** tries: retries done after no answer. context: earlier prompts (TL;DR). was: the gist to keep if the redo gives none. */
+type SumJob = { key: string; text: string; brief: boolean; tries?: number; context?: string; was?: string }
 const jobs: SumJob[] = []
 let summing = false
+/** Prompts a TL;DR press is summing again; a long prompt with no gist is owed one anyway. */
+const redoing = new Set<string>()
+/** The row shows "processing…": the model owes this prompt its gist ('' in 👤 view, so never there). */
+const isBusy = (a: { text: string; gist?: string }) => a.gist === undefined && (isPending(a) || redoing.has(a.text))
+const PROCESSING = 'processing…'
+/** Waits before asking again when the model gave no answer (helper error, or the 15 s timeout while other tabs use it). */
+const RETRY_MS = [5_000, 20_000, 60_000]
+/** Every chat row the engine drew, by promptKey of its text: its requestId, for $.ui.scroll. */
+// shortcut: one band per process, like roomNow; key it per session if that changes.
+const drawnAt = new Map<string, string>()
+
+function queue($: EngineInterface, add: SumJob[], first: boolean): void {
+  if (first) jobs.unshift(...add)
+  else jobs.push(...add)
+  if (!summing) void drain($)
+}
 /**
  * Queues an on-device gist for each long prompt that has none. `now`: a just-sent prompt, first in line, which
  * also gets the S row's brief. `full`: the prompt as sent; the log keeps only its first 300 chars.
  */
 function summarize($: EngineInterface, prompts: Observed['log'], now = false, full?: string): void {
-  const add = prompts.filter(isPending).map(p => ({ key: p.text, text: full ?? p.text, brief: now }))
-  if (now) jobs.unshift(...add)
-  else jobs.push(...add)
-  if (!summing) void drain($)
+  queue($, prompts.filter(isPending).map(p => ({ key: p.text, text: full ?? p.text, brief: now })), now)
 }
 async function drain($: EngineInterface): Promise<void> {
   summing = true
@@ -479,13 +514,45 @@ async function drain($: EngineInterface): Promise<void> {
     summing = false
   }
 }
-/** One gist, retried once in fewer words; '' when both fail, so the row shows the prompt and never "…" for good. */
+/**
+ * One gist, asked once more in fewer words when the reply does not fit; '' when both do not, so the row shows the
+ * prompt. No answer at all is not a bad reply: the prompt stays "processing…" and is asked again later.
+ */
 async function gistOf($: EngineInterface, j: SumJob): Promise<void> {
-  if (!(await read($, observed)).log.some(a => a.kind === 'prompt' && a.text === j.key && isPending(a))) return
-  const short = async () => promptSum(await ask($, BRIEF_SYSTEM, j.text), j.text, 6)
-  const gist = promptSum(await ask($, SUM_SYSTEM, j.text), j.text) ?? (await short()) ?? ''
-  const brief = j.brief && gist ? (gist.split(' ').length <= 6 ? gist : await short()) : undefined
-  await update($, observed, o => setSum(o, j.key, gist, brief))
+  if (!(await read($, observed)).log.some(a => a.kind === 'prompt' && a.text === j.key && isBusy(a))) return
+  // One line: ask() folds every space and newline into one space.
+  const text = j.context ? `Earlier prompts in this chat: ${j.context}. The request: ${j.text}` : j.text
+  // undefined: no answer this time; '': an answer promptSum dropped, or a Mac whose model can never answer (null).
+  const sum = async (system: string, most?: number) => {
+    const r = await ask($, j.context ? `${system} ${CONTEXT_NOTE}` : system, text)
+    return r === undefined ? undefined : (promptSum(r ?? undefined, j.text, most) ?? '')
+  }
+  let gist = await sum(SUM_SYSTEM)
+  if (gist === '') gist = await sum(BRIEF_SYSTEM, 6)
+  if (gist === undefined) return retry($, j)
+  const brief = j.brief && gist ? (gist.split(' ').length <= 6 ? gist : (await sum(BRIEF_SYSTEM, 6)) || undefined) : undefined
+  redoing.delete(j.key)
+  await update($, observed, o => setSum(o, j.key, gist || j.was || '', brief))
+}
+const CONTEXT_NOTE = 'The earlier prompts are context only: give the gist of the last request.'
+/** No answer: back in the queue after 5, 20, then 60 s (others go first meanwhile); after that '' and `failed`. */
+async function retry($: EngineInterface, j: SumJob): Promise<void> {
+  const n = j.tries ?? 0
+  if (n < RETRY_MS.length) return void $.clock.after(RETRY_MS[n]!, () => queue($, [{ ...j, tries: n + 1 }], false))
+  redoing.delete(j.key)
+  await update($, observed, o => setSum(o, j.key, j.was ?? '', undefined, !j.was))
+}
+/** TL;DR: the prompt's gist again, with the chat's 3 prompts before it as context; "processing…" meanwhile. */
+async function redo($: EngineInterface, text: string): Promise<void> {
+  const o = await read($, observed)
+  const i = o.log.findLastIndex(a => a.kind === 'prompt' && a.text === text)
+  if (i < 0 || redoing.has(text)) return
+  const a = o.log[i]!
+  const context = o.log.slice(0, i).filter(p => p.kind === 'prompt').slice(-3).map(p => `"${p.gist || promptLine(p.text).slice(0, 200)}"`).join('; ')
+  redoing.add(text)
+  await update($, observed, x => ({ ...x, log: x.log.map(p => (p.kind === 'prompt' && p.text === text ? { ...p, gist: undefined, failed: undefined } : p)) }))
+  const isNewest = o.log.findLast(p => p.kind === 'prompt') === a
+  queue($, [{ key: text, text, brief: isNewest, context: context || undefined, was: a.gist || undefined }], true)
 }
 /** Prompts summarized at load, newest first: the rows most likely in view. */
 const LOAD_SUMS = 20
@@ -513,7 +580,13 @@ function published(e: ToolCallInput, ran: ToolCallResult): { url: string; title:
 // ---- views: each returns one element per row, so the band can cut to its height ----
 
 type Els = ReturnType<EngineInterface['ui']['resolve']>
-type Acts = { all(): unknown; less?(): unknown; copy(url: string, surface: Parameters<EngineInterface['ui']['copy']>[0]['surface']): unknown }
+type Acts = {
+  all(): unknown; less?(): unknown; copy(url: string, surface: Parameters<EngineInterface['ui']['copy']>[0]['surface']): unknown
+  /** TL;DR: sum up this prompt again, with context. */
+  tldr(text: string): unknown
+  /** Scroll the chat to this prompt. */
+  jump(text: string): unknown
+}
 const GLYPH: Record<string, [string, string?]> = {
   completed: ['✓', 'success'], in_progress: ['●', 'suggestion'], active: ['●', 'suggestion'],
   pending: ['○'], remaining: ['○'], blocked: ['✗', 'error'],
@@ -541,7 +614,7 @@ function body(els: Els, d: Data, act: Acts, cap: number, cols: number, off: numb
   if (d.tab === 'summary') return summaryView(els, d.cache, cap, act, cols, d.now)
   if (d.tab === 'artifacts') return <Box flexDirection="column">{fit(els, artifactRows(els, d.arts, d.now, act, cols), cap, act, 'arts')}</Box>
   // One timeline at the full width; ▲ ▼ and the wheel move it under the pinned head, so nothing is cut.
-  return <Box flexDirection="column">{threadWindow(els, d.o, off, cols).slice(0, cap)}</Box>
+  return <Box flexDirection="column">{threadWindow(els, d.o, off, cols, act).slice(0, cap)}</Box>
 }
 
 /**
@@ -551,7 +624,7 @@ function body(els: Els, d: Data, act: Acts, cap: number, cols: number, off: numb
 function brief(els: Els, d: Data, act: Acts, cols: number, off: number, n: number): JSX.Element[] {
   const { Text } = els
   if (d.tab === 'artifacts') return artifactRows(els, d.arts, d.now, act, cols).slice(0, n)
-  if (d.tab === 'threads') return threadWindow(els, d.o, off, cols).slice(0, n)
+  if (d.tab === 'threads') return threadWindow(els, d.o, off, cols, act).slice(0, n)
   return [summaryView(els, d.cache, n, act, cols, d.now)]
 }
 
@@ -639,7 +712,7 @@ const IN = (n: number) => ' '.repeat(n)
  * One timeline row: the text on the left, cut with "…" at the first ┊, then the tests and time columns, kept on
  * every row at fixed widths so no text runs under them and every ┊ lines up top to bottom.
  */
-function row({ Box, Text }: Els, testsW: number, left: JSX.Element, tests: Part[] = [], at?: number): JSX.Element {
+function row({ Box, Text }: Els, testsW: number, left: JSX.Element, tests: Part[] | JSX.Element = [], at?: number): JSX.Element {
   const cell = (w: number, parts: Part[]) => (
     <Box width={w + 3} flexShrink={0}>
       <Text wrap="truncate-end"><Text color={FAINT}>{' ┊ '}</Text>{' '.repeat(Math.max(0, w - lenOf(parts)))}{parts.map(([s, c]) => <Text color={c} dimColor={!c}>{s}</Text>)}</Text>
@@ -648,7 +721,10 @@ function row({ Box, Text }: Els, testsW: number, left: JSX.Element, tests: Part[
   return (
     <Box flexDirection="row">
       <Box flexGrow={1} flexShrink={1} minWidth={0}>{left}</Box>
-      {cell(testsW, tests)}
+      {Array.isArray(tests) ? cell(testsW, tests) : (
+        // A button in the tests column: right-aligned like the counts, the column still testsW wide.
+        <Box width={testsW + 3} flexShrink={0} flexDirection="row"><Text color={FAINT}>{' ┊ '}</Text><Box flexGrow={1} />{tests}</Box>
+      )}
       {cell(TIME_W, at === undefined ? [] : [[clock(at)]])}
     </Box>
   )
@@ -660,17 +736,29 @@ function row({ Box, Text }: Els, testsW: number, left: JSX.Element, tests: Part[
  * edits, test runs, commits, helpers) and the later prompts (`› <prompt>`, the last 3), all sorted by time with prompts
  * mixed in, then `❯ <activeForm>…` of the running task. Only the newest prompt of the timeline takes 2 rows.
  */
-function threadBlock(els: Els, o: Observed, t: Thread, testsW: number, cols: number): JSX.Element[] {
-  const { Text } = els
-  const R = (left: JSX.Element, tests?: Part[], at?: number) => row(els, testsW, left, tests, at)
+function threadBlock(els: Els, o: Observed, t: Thread, testsW: number, cols: number, act: Acts): JSX.Element[] {
+  const { Box, Text, Button } = els
+  const R = (left: JSX.Element, tests?: Part[] | JSX.Element, at?: number) => row(els, testsW, left, tests, at)
   const isNow = t.id === o.current
   const steps = (t.plan ?? []).filter(s => s.mark !== '#' && s.depth === 0).length
   const [g, tone] = headGlyph(o, t)
   const mine = o.log.filter(a => a.thread === t.id)
-  const lead = R(
-    <Text wrap="truncate-end"><Text color={tone}>{g}</Text> <Text bold color={isNow ? 'suggestion' : undefined}>{nameOf(t)}</Text></Text>,
-    testCell(mine.findLast(a => a.kind === 'test')?.text), t.sentAt,
+  // The left area: the band less both columns. Button labels are cut to it here, so a row stays one line.
+  const left = cols - (testsW + 3) - (TIME_W + 3)
+  const cut = (s: string, n: number) => ([...s].length > n ? [...s].slice(0, Math.max(0, n - 1)).join('') + '…' : s)
+  // A prompt's text is a plain Button: a press scrolls the chat to that prompt. "processing…" while the model sums it.
+  const jump = (a: Activity, face: JSX.Element, label: string) => (
+    <Button key={`jump-${o.log.indexOf(a)}`} plain label={label} onPress={() => act.jump(a.text)}>{isBusy(a) ? <Text dimColor>{PROCESSING}</Text> : face}</Button>
   )
+  // An empty tests cell holds TL;DR: sum this prompt up again, with the chat's earlier prompts as context.
+  const tldr = (a: Activity, tests: Part[]) => (tests.length ? tests : <Button key={`tldr-${o.log.indexOf(a)}`} plain dimColor label=" TL;DR " onPress={() => act.tldr(a.text)} />)
+  const first = mine.find(a => a.kind === 'prompt' && a.text === t.first)
+  const name = cut(nameOf(t), left - 2)
+  const face = <Text bold color={isNow ? 'suggestion' : undefined}>{name}</Text>
+  const lastTest = testCell(mine.findLast(a => a.kind === 'test')?.text)
+  const lead = first
+    ? R(<Box flexDirection="row"><Box flexShrink={0}><Text color={tone}>{g} </Text></Box>{jump(first, face, name)}</Box>, tldr(first, lastTest), t.sentAt)
+    : R(<Text wrap="truncate-end"><Text color={tone}>{g}</Text> {face}</Text>, lastTest, t.sentAt)
   const run = running(t)
   const tasks = t.todos.map(d => {
     const [mark, color] = GLYPH[d.status] ?? ['○']
@@ -687,24 +775,34 @@ function threadBlock(els: Els, o: Observed, t: Thread, testsW: number, cols: num
       return R(<Text wrap="truncate-end">{IN(4 + 2 * (s.depth + (underHeading ? 1 : 0)))}<Text dimColor>{s.mark}</Text> {s.text}</Text>)
     }) : []),
   ] : []
-  // The left area: the band less both columns and the "  › " indent; the newest prompt wraps inside it.
-  const w = cols - (testsW + 3) - (TIME_W + 3) - 4
+  // The left area less the "  › " indent; the newest prompt wraps inside it.
+  const w = left - 4
   const newest = o.log.findLast(a => a.kind === 'prompt')
-  // The first prompt names the thread. Each prompt row shows the model's gist (a dim "…" while it is on its way),
-  // else the prompt; the newest wraps to 2 rows, each older one is cut at the first ┊.
+  // The first prompt names the thread. Each prompt row shows the model's gist, else the prompt; the newest wraps to
+  // 2 rows, each older one is cut at the first ┊.
   const prompts = mine.filter(a => a.kind === 'prompt').slice(1).slice(-3).map(a => {
     const text = a.gist || promptLine(a.text)
-    const [one, two] = isPending(a) ? [<Text dimColor>…</Text>] : a === newest ? twoLines(text, w) : [text]
+    const [one, two] = a === newest && !isBusy(a) ? twoLines(text, w) : [cut(text, w)]
     return { at: a.at, rows: [
-      R(<Text wrap="truncate-end">{IN(2)}<Text dimColor>› </Text>{one}</Text>, [], a.at),
+      R(<Box flexDirection="row"><Box flexShrink={0}><Text>{IN(2)}<Text dimColor>› </Text></Text></Box>{jump(a, <Text>{one}</Text>, one)}</Box>, tldr(a, []), a.at),
       ...(two ? [R(<Text wrap="truncate-end">{IN(4)}{two}</Text>)] : []),
     ] }
   })
-  const work = tasks.length ? [] : mine.filter(a => WORK[a.kind]).slice(-3).map(a => {
+  // Work in words, never a command or a path: a run of edits in a row (no prompt or other step between) is one row.
+  const runs = mine.filter(a => WORK[a.kind] || a.kind === 'prompt').reduce<Activity[][]>((g, a) => {
+    if (a.kind === 'edit' && g.at(-1)?.[0]!.kind === 'edit') g.at(-1)!.push(a)
+    else g.push([a])
+    return g
+  }, []).filter(g => g[0]!.kind !== 'prompt')
+  const work = tasks.length ? [] : runs.slice(-3).map(g => {
+    const a = g.at(-1)!
     const bad = a.kind === 'test' && a.text.startsWith('tests fail')
     const [mark, color] = bad ? ['✗', 'error'] : WORK[a.kind]!
-    // A test run's counts go to the tests column, not the text.
-    const text = a.kind === 'test' ? a.text.replace(/^tests (pass|fail): /, '').replace(/: \d+ pass, \d+ fail$/, '') : a.text.replace(/^(commit|helper): /, '')
+    const files = new Set(g.map(x => x.text)).size
+    // A test run's counts go to the tests column. An old commit entry that kept its command reads "Committed".
+    const msg = a.text.match(/^commit: (?!git\b)([^<]+)$/)?.[1]
+    const text = a.kind === 'test' ? (bad ? 'Tests failed' : 'Tests passed') : a.kind === 'edit' ? `Edited ${plural(files, 'file')}`
+      : a.kind === 'commit' ? (msg ? `Committed: ${msg}` : 'Committed') : a.text.replace(/^helper: /, '')
     return { at: a.at, rows: [R(<Text wrap="truncate-end">{IN(2)}<Text color={color} dimColor={!color}>{mark}</Text> <Text dimColor>{text}</Text></Text>, a.kind === 'test' ? testCell(a.text) : [], a.at)] }
   })
   // Oldest to newest, like the chat: what is live (the latest prompt, the running task) is the lowest row.
@@ -718,14 +816,14 @@ function threadBlock(els: Els, o: Observed, t: Thread, testsW: number, cols: num
 }
 
 /** Every thread oldest first (the current one last), each its head row then its own rows; `head[i]` is row i's thread head. */
-function timeline(els: Els, o: Observed, cols: number): { rows: JSX.Element[]; head: number[] } {
+function timeline(els: Els, o: Observed, cols: number, act: Acts): { rows: JSX.Element[]; head: number[] } {
   // The tests column as wide as its longest cell on any row, so it lines up down the list.
   const testsW = Math.max(TESTS_W, ...o.log.filter(a => a.kind === 'test').map(a => lenOf(testCell(a.text))))
   const rows: JSX.Element[] = []
   const head: number[] = []
   for (const t of ordered(o)) {
     const at = rows.length
-    for (const r of threadBlock(els, o, t, testsW, cols)) { rows.push(r); head.push(at) }
+    for (const r of threadBlock(els, o, t, testsW, cols, act)) { rows.push(r); head.push(at) }
   }
   return { rows, head }
 }
@@ -734,8 +832,8 @@ function timeline(els: Els, o: Observed, cols: number): { rows: JSX.Element[]; h
 const roomOf = (len: number, n: number) => Math.max(0, len - n)
 
 /** The timeline from row `off`, the head of the thread that row is in pinned over it like a navbar. */
-function threadWindow(els: Els, o: Observed, off: number, cols: number): JSX.Element[] {
-  const { rows, head } = timeline(els, o, cols)
+function threadWindow(els: Els, o: Observed, off: number, cols: number, act: Acts): JSX.Element[] {
+  const { rows, head } = timeline(els, o, cols, act)
   if (!rows.length) return [<els.Text dimColor>Nothing yet.</els.Text>]
   // Row `off` is the window's top; its thread's head takes that row, so each ▼ moves the rows under it by one.
   return [rows[head[off] ?? 0]!, ...rows.slice(off + 1)]

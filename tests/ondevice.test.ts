@@ -30,14 +30,17 @@ test('compiles once, asks the model, and answers the same text from the cache', 
 test('no command line tools means no model line and no swiftc call', async () => {
   resetOnDevice()
   const { $, calls } = host(() => ({ exitCode: 2 }))
-  expect(await onDevice($, 'sys', 'x')).toBeUndefined()
+  expect(await onDevice($, 'sys', 'x')).toBeNull()
   expect(calls).toEqual(['xcode-select'])
 })
 
-test('Apple Intelligence off answers undefined and stops asking', async () => {
+test('Apple Intelligence off answers null (never) and stops asking; a failed request answers undefined (try later)', async () => {
+  resetOnDevice()
+  const once = host(argv => ({ exitCode: argv[0]!.includes('ondevice-') ? 1 : 0 }), true)
+  expect(await onDevice(once.$, 'sys', 'a')).toBeUndefined()
   resetOnDevice()
   const { $, calls } = host(argv => ({ exitCode: argv[0]!.includes('ondevice-') ? 2 : 0 }), true)
-  expect(await onDevice($, 'sys', 'a')).toBeUndefined()
-  expect(await onDevice($, 'sys', 'b')).toBeUndefined()
+  expect(await onDevice($, 'sys', 'a')).toBeNull()
+  expect(await onDevice($, 'sys', 'b')).toBeNull()
   expect(calls.filter(c => c.startsWith('ondevice-')).length).toBe(1)
 })
