@@ -337,7 +337,11 @@ export function threadName(reply: string | undefined): string | undefined {
   return s[0]!.toUpperCase() + s.slice(1)
 }
 
-export const SUM_SYSTEM = 'Give the gist of the request in the message in 4 to 8 plain words, like a commit subject (Fix realtime band updates). Reply with the words only, no quotes.'
+/** Words a gist of `chars` characters holds: about 7 characters a word, 8 to 18. */
+export const gistWords = (chars: number) => Math.max(8, Math.min(18, Math.floor(chars / 7)))
+/** The gist ask, sized to the `›` row's text width in the band: at most `chars` characters, so it fills the row. */
+export const sumSystem = (chars: number) =>
+  `Give the gist of the request in the message in 4 to ${gistWords(chars)} plain words, at most ${chars} characters, like a commit subject (Fix realtime band updates). Reply with the words only, no quotes.`
 /** The S row's gist, and the retry when the first gist came back too long (a long dictated prompt often gets 12+ words). */
 export const BRIEF_SYSTEM = 'Give the gist of the request in the message in 3 to 5 plain words, like a short commit subject (Fix band redraw). Reply with the words only, no quotes.'
 /** A prompt shorter than this (about 7 words) is its own gist: no model run. */
@@ -348,10 +352,11 @@ export const isPending = (a: { text: string; gist?: string }) => a.gist === unde
  * The model's gist of `prompt` in 3 to `most` words, or undefined: shorter or longer (never cut), ending on a
  * dangling word, or an echo of the prompt's own opening words.
  */
-export function promptSum(reply: string | undefined, prompt: string, most = 9): string | undefined {
+export function promptSum(reply: string | undefined, prompt: string, most = 9, chars = Infinity): string | undefined {
   const s = untag((reply ?? '').split('\n')[0]!).replace(/^(gist|summary|subject):\s*/i, '').replace(/["“”*_`]/g, '').replace(/\.$/, '').trim()
   const w = s.split(/\s+/).filter(Boolean)
-  if (w.length < 3 || w.length > most || isFragment(w)) return undefined
+  // Wider than the row: it would be cut with "…", so it is dropped like a long one.
+  if (w.length < 3 || w.length > most || [...s].length > chars || isFragment(w)) return undefined
   const echo = (x: string) => x.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
   if (echo(promptLine(prompt)).startsWith(echo(s))) return undefined
   return s[0]!.toUpperCase() + s.slice(1)

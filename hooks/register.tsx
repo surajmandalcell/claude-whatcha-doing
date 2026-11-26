@@ -5,7 +5,7 @@ import type { Activity, ArtifactRow, Artifacts, Band, Observed, Summary, Summary
 import {
   demoArtifacts, demoObserved, demoSummary, sortSummary, touchTodos, emptyObserved, hash, isTestCommand, onAgent, onArtifact, onCommit, onEdit,
   dropEngineText, isEngineText, clearErrors, isQuietExit, noticeOf, promptLine, untag, onNotice, onError, onPlan, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, sentLabel, short, stamp, timeOf, transcriptTimes, type Times, unlist, testResult, SUMMARY_SYSTEM, summaryInput,
-  summaryPrompt, SUMMARY_OUT, NAME_SYSTEM, threadName, SUM_SYSTEM, BRIEF_SYSTEM, isPending, promptSum, setSum, key as promptKey,
+  summaryPrompt, SUMMARY_OUT, NAME_SYSTEM, threadName, sumSystem, gistWords, BRIEF_SYSTEM, isPending, promptSum, setSum, key as promptKey,
 } from './observe'
 import { onDevice } from './ondevice'
 
@@ -79,6 +79,8 @@ async function load(r: Reads): Promise<Data> {
 
 // shortcut: the last drawn timeline's scroll room, for the wheel hook; one band per process, keep per session if that changes.
 let roomNow = 0
+// shortcut: the `›` row's text width at the last draw (60 before one), for the gist's length; per session if bands multiply.
+let gistRoom = 60
 
 export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
@@ -236,6 +238,8 @@ export const register: Register = (on, options) => {
       tick: () => { const t = $.clock.every(1000, () => $.ui.invalidate('ui.render')); return () => t.cancel() },
     }
     const cols = e.props.bodyColumns
+    // The `›` row's text: the band less the ↻, tests and time columns and the "  › " indent.
+    gistRoom = Math.max(30, cols - (REDO_W + 3) - (TESTS_W + 3) - (TIME_W + 3) - 4)
     const width = e.surface === 'terminal' ? cols : undefined
     const stack = (mine: NonNullable<typeof below>) => (below ? <Box flexDirection="column">{mine}{below}</Box> : mine)
     const setView = (v: Partial<Band>) => update($, band, (x): Band => ({ ...x, ...v })).then(() => saveView($))
@@ -542,11 +546,13 @@ async function gistOf($: EngineInterface, j: SumJob): Promise<void> {
   // One line: ask() folds every space and newline into one space.
   const text = j.context ? `Earlier prompts in this chat: ${j.context}. The request: ${j.text}` : j.text
   // undefined: no answer this time; '': an answer promptSum dropped, or a Mac whose model can never answer (null).
+  // As many words as the `›` row holds at the band's last drawn width; a reply wider than the row is asked again shorter.
+  const chars = gistRoom
   const sum = async (system: string, most?: number) => {
     const r = await ask($, j.context ? `${system} ${CONTEXT_NOTE}` : system, text)
-    return r === undefined ? undefined : (promptSum(r ?? undefined, j.text, most) ?? '')
+    return r === undefined ? undefined : (promptSum(r ?? undefined, j.text, most, chars) ?? '')
   }
-  let gist = await sum(SUM_SYSTEM)
+  let gist = await sum(sumSystem(chars), gistWords(chars) + 1)
   if (gist === '') gist = await sum(BRIEF_SYSTEM, 6)
   if (gist === undefined) return retry($, j)
   const brief = j.brief && gist ? (gist.split(' ').length <= 6 ? gist : (await sum(BRIEF_SYSTEM, 6)) || undefined) : undefined

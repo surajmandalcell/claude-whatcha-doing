@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { isQuietExit, DEMO_REPLY, demoObserved, planSteps, sentLabel, threadName, parseSummary, short, snippet, SUMMARY_SYSTEM, summaryInput, summaryPrompt, titleOf, testResult, isEngineText, dropEngineText, isTestCommand, noticeOf, onNotice, promptLine } from '../hooks/observe'
+import { isQuietExit, DEMO_REPLY, demoObserved, planSteps, sentLabel, threadName, parseSummary, short, snippet, SUMMARY_SYSTEM, summaryInput, summaryPrompt, titleOf, testResult, isEngineText, dropEngineText, isTestCommand, noticeOf, onNotice, promptLine, promptSum, gistWords, sumSystem } from '../hooks/observe'
 import { bodyCap, safeHref, testCell } from '../hooks/register'
 import { resetOnDevice } from '../hooks/ondevice'
 
@@ -631,7 +631,7 @@ test('a new long prompt gets its gist with no toggle: "…" while the model runs
       const two = text.includes('second')
       // A long dictated prompt often gets a 12+ word "gist": too long, so the model is asked again in fewer words.
       stdout = system.includes('3 to 5') ? (two ? 'Gist every new prompt' : 'Fix missing prompt gists')
-        : system.includes('4 to 8') ? (two ? 'Make every new prompt get its gist' : 'Diagnose fresh prompt gist failure, fix queue, redraw, limit input, retry model, show raw prompt')
+        : /4 to \d+/.test(system) ? (two ? 'Make every new prompt get its gist' : 'Diagnose fresh prompt gist failure, fix queue, redraw, limit input, retry model, show raw prompt')
         : 'Band gist fixes'
     }
     return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -1103,4 +1103,14 @@ test('Summary board is a kanban: newest first in every column, whatever order Ha
   await ui.press({ key: 'refresh' })
   expect(screen(bodyOf(await ui.drawn()), 145).map(l => l.slice(0, 34).trim())[2]).toBe('○ Step 2')
   await ui.unmount()
+})
+
+test('gist length follows the band: 70 columns of room ask for up to 10 words; a reply wider than the row is dropped', () => {
+  expect(gistWords(70)).toBe(10)
+  expect(gistWords(20)).toBe(8)
+  expect(gistWords(500)).toBe(18)
+  expect(sumSystem(70)).toContain('4 to 10 plain words, at most 70 characters')
+  const reply = 'Make the band gist use the full row width'
+  expect(promptSum(reply, 'long prompt text here', 11, 70)).toBe(reply)
+  expect(promptSum(reply, 'long prompt text here', 11, 20)).toBeUndefined()
 })
