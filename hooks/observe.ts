@@ -337,11 +337,20 @@ export function threadName(reply: string | undefined): string | undefined {
   return s[0]!.toUpperCase() + s.slice(1)
 }
 
-/** Words a gist of `chars` characters holds: about 7 characters a word, 8 to 18. */
-export const gistWords = (chars: number) => Math.max(8, Math.min(18, Math.floor(chars / 7)))
-/** The gist ask, sized to the `›` row's text width in the band: at most `chars` characters, so it fills the row. */
-export const sumSystem = (chars: number) =>
-  `Give the gist of the request in the message in 4 to ${gistWords(chars)} plain words, at most ${chars} characters, like a commit subject (Fix realtime band updates). Reply with the words only, no quotes.`
+/**
+ * The gist's word target: what the `›` row of `chars` holds (about 7 characters a word) and a third of the prompt's
+ * words, 6 to 18. A long dictated prompt gets a gist that fills the row; a short one is not padded.
+ */
+export const gistWords = (chars: number, prompt = '') =>
+  Math.max(6, Math.min(18, Math.floor(chars / 7), Math.ceil(promptLine(prompt).split(/\s+/).length / 3)))
+/**
+ * The gist ask. A target, not a range: given "4 to 18 words" the on-device model stays near 4, given
+ * "about 16 words" it writes 13 to 16.
+ */
+export const sumSystem = (chars: number, prompt = '') => {
+  const n = gistWords(chars, prompt)
+  return `Summarize the request in the message as one line of about ${n} words (about ${Math.min(chars, n * 7)} characters), like a detailed commit subject that keeps the key details. Reply with the line only, no quotes.`
+}
 /** The S row's gist, and the retry when the first gist came back too long (a long dictated prompt often gets 12+ words). */
 export const BRIEF_SYSTEM = 'Give the gist of the request in the message in 3 to 5 plain words, like a short commit subject (Fix band redraw). Reply with the words only, no quotes.'
 /** A prompt shorter than this (about 7 words) is its own gist: no model run. */

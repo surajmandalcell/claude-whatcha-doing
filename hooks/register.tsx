@@ -550,7 +550,7 @@ async function gistOf($: EngineInterface, j: SumJob): Promise<void> {
     const r = await ask($, j.context ? `${system} ${CONTEXT_NOTE}` : system, text)
     return r === undefined ? undefined : (promptSum(r ?? undefined, j.text, most, chars) ?? '')
   }
-  let gist = await sum(sumSystem(chars), gistWords(chars) + 1)
+  let gist = await sum(sumSystem(chars, j.text), gistWords(chars, j.text) + 4)
   if (gist === '') gist = await sum(BRIEF_SYSTEM, 6)
   if (gist === undefined) return retry($, j)
   const brief = j.brief && gist ? (gist.split(' ').length <= 6 ? gist : (await sum(BRIEF_SYSTEM, 6)) || undefined) : undefined

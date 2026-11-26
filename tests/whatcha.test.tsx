@@ -631,7 +631,7 @@ test('a new long prompt gets its gist with no toggle: "…" while the model runs
       const two = text.includes('second')
       // A long dictated prompt often gets a 12+ word "gist": too long, so the model is asked again in fewer words.
       stdout = system.includes('3 to 5') ? (two ? 'Gist every new prompt' : 'Fix missing prompt gists')
-        : /4 to \d+/.test(system) ? (two ? 'Make every new prompt get its gist' : 'Diagnose fresh prompt gist failure, fix queue, redraw, limit input, retry model, show raw prompt')
+        : /about \d+ words/.test(system) ? (two ? 'Make every new prompt get its gist' : 'Diagnose fresh prompt gist failure, fix queue, redraw, limit input, retry model, show raw prompt')
         : 'Band gist fixes'
     }
     return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -770,7 +770,7 @@ test('no answer: the spinner, "retrying, try 1 of 3" after a miss, asked again a
     let out = { exitCode: 0, stdout: '' }
     if (e.argv[0]!.includes('ondevice-')) {
       const { system, text } = JSON.parse(String(e.init?.stdin)) as { system: string; text: string }
-      if (system.includes('gist')) {
+      if (/gist|about \d+ words/.test(system)) {
         asked.push(text)
         // exit 1: a one-off miss (the helper failed or timed out), not "no model on this Mac".
         out = misses-- > 0 ? { exitCode: 1, stdout: '' } : { exitCode: 0, stdout: text.includes('Earlier prompts') ? 'Retry gists with chat context' : 'Fix the band gist retry' }
@@ -872,7 +872,7 @@ test('older prompts: one line, the on-device gist or the cut prompt, in M and L;
   on('fs.exists', () => ({ value: true }))
   on('process.run', (_, e) => {
     const stdin = String(e.init?.stdin ?? '')
-    const gist = stdin.includes('gist')
+    const gist = /gist|about \d+ words/.test(stdin)
     const out = e.argv[0]!.includes('ondevice-') ? { exitCode: 0, stdout: !gist ? 'Graph rule for references' : stdin.includes('graph rule') ? 'Index global rule references per project' : reply } : { exitCode: 0, stdout: '' }
     return { value: { stderr: '', isStdoutTruncated: false, isStderrTruncated: false, ...out } }
   })
@@ -1106,11 +1106,13 @@ test('Summary board is a kanban: newest first in every column, whatever order Ha
   await ui.unmount()
 })
 
-test('gist length follows the band: 70 columns of room ask for up to 10 words; a reply wider than the row is dropped', () => {
-  expect(gistWords(70)).toBe(10)
-  expect(gistWords(20)).toBe(8)
-  expect(gistWords(500)).toBe(18)
-  expect(sumSystem(70)).toContain('4 to 10 plain words, at most 70 characters')
+test('gist length follows the band and the prompt: a long prompt fills the row, a short one is not padded; a reply wider than the row is dropped', () => {
+  const long = Array(90).fill('word').join(' ')
+  expect(gistWords(130, long)).toBe(18)
+  expect(gistWords(70, long)).toBe(10)
+  expect(gistWords(130, Array(30).fill('word').join(' '))).toBe(10)
+  expect(gistWords(130, 'short prompt')).toBe(6)
+  expect(sumSystem(130, long)).toContain('about 18 words (about 126 characters)')
   const reply = 'Make the band gist use the full row width'
   expect(promptSum(reply, 'long prompt text here', 11, 70)).toBe(reply)
   expect(promptSum(reply, 'long prompt text here', 11, 20)).toBeUndefined()
