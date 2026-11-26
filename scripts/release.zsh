@@ -14,4 +14,7 @@ v=$(node -e '
 # Commit only the version: work in progress stays out of the release.
 git commit -q -m "Release $v" .claude-plugin/plugin.json
 git push -q
+# This Mac's own copy updates now, not only when the marketplace auto-update runs.
+claude plugin marketplace update claude-whatcha-doing >/dev/null
+claude plugin update whatcha-doing@claude-whatcha-doing >/dev/null
 echo "Released $v"
