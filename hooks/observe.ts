@@ -184,6 +184,12 @@ export const sentLabel = (at: number) => {
   return `sent ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+/** Whole calendar days from `at` to `now`, local time: 0 today, 1 yesterday, even 5 minutes across midnight. */
+export const daysAgo = (at: number, now: number) => {
+  const day = (t: number) => { const d = new Date(t); return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) }
+  return Math.max(0, Math.round((day(now) - day(at)) / 86_400_000))
+}
+
 /** The first ~n chars on one line, cut at a word, so a prompt reads as the owner typed it. */
 export function snippet(s: string, n = 80): string {
   const one = s.replace(/\s+/g, ' ').replace(/[\x00-\x1f\x7f-\x9f]/g, '').trim()

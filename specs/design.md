@@ -16,7 +16,7 @@ All looks are settled. Nothing is open.
   The top row is always the head of the thread the top visible row belongs to, like a navbar. Status row + hairline + 6 rows must fit the
   engine's `maxRows`, or the engine scrolls the band and a row is lost: M draws `min(6, maxRows - header
   - 1)` rows (header: 1 row, 2 under 120 columns). Summary shows the same board as L, one row per task (name only), as many as fit. Artifacts shows the header and the
-  newest one.
+  newest one. M always draws its full 6 rows (blank ones under short content) on every tab, so nothing below moves when a tab or the content changes.
 - **Height**: L's body is 20% of the terminal rows, at most 22 and at least 3 (24 rows: 4, 50: 10, 120: 22).
   Claude Code also caps the band at half the terminal (`maxRows`).
 - **Scroll**: ` ⤒ `` ▲ `` ▼ `` ⤓ ` (3 columns wide each, no gap) sit after the 🤖 button in M and L when the
@@ -64,11 +64,11 @@ All looks are settled. Nothing is open.
        the compact `18✓ 1✗` (pass green, fail red) when both; 1000 and up reads `1.2k`. The column grows to
        its widest cell (at least 9), the same on every row.
        Empty with no run, or a run with no count read. Only the thread row shows a count: its last run.
-     - time: `10:42`, dim. A thread row shows when the owner last sent it a prompt (`sentAt`); a `›` row
+     - time: `10:42, 2d`, dim: the clock time, then whole calendar days ago (`0d` today, `1d` yesterday). A thread row shows when the owner last sent it a prompt (`sentAt`); a `›` row
        when it was sent; a result line when the turn's last work happened (an edit, a commit, a test run,
        a helper finishing). Live, times come from `prompt.submit` and `tool.call`; rebuilt threads
        take them from the `timestamp` of each line in the session's transcript file
-       (`~/.claude/projects/<cwd>/<session id>.jsonl`, its last 4 MB): the prompt's line, and each tool
+       (`~/.claude/projects/<cwd>/<session id>.jsonl`, the whole file cut by `jq` to its user lines, about 1/300 of it, so a 100 MB file still fits the 4 MB a run returns; without `jq`, its last 4 MB): the prompt's line, and each tool
        result's line by its `tool_use_id`.
      A ` ┊ ` in `#3a3a3a`, much fainter than dim, separates the columns. No model;
   2. col 2: `Plan · N steps`; only the current thread's plan unfolds at col 4: section headings bold and

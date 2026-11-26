@@ -4,7 +4,7 @@ import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Regist
 import type { Activity, ArtifactRow, Artifacts, Band, Observed, Summary, SummaryCache, Tab, Thread, Todo } from '../types'
 import {
   demoArtifacts, demoObserved, demoSummary, sortSummary, touchTodos, emptyObserved, hash, isTestCommand, onAgent, onArtifact, onCommit, onEdit,
-  dropEngineText, isEngineText, clearErrors, isQuietExit, noticeOf, promptLine, untag, onNotice, onError, onPlan, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, sentLabel, short, stamp, timeOf, transcriptTimes, type Times, unlist, testResult, SUMMARY_SYSTEM, summaryInput,
+  dropEngineText, isEngineText, clearErrors, isQuietExit, noticeOf, promptLine, untag, onNotice, onError, onPlan, onPrompt, onTest, onTodos, onTurnEnd, parseSummary, sentLabel, daysAgo, short, stamp, timeOf, transcriptTimes, type Times, unlist, testResult, SUMMARY_SYSTEM, summaryInput,
   summaryPrompt, SUMMARY_OUT, NAME_SYSTEM, threadName, sumSystem, gistWords, BRIEF_SYSTEM, isPending, promptSum, setSum, key as promptKey,
 } from './observe'
 import { onDevice } from './ondevice'
@@ -283,6 +283,7 @@ export const register: Register = (on, options) => {
     const { o, cache, tab } = d
     // Every draw, not only the Threads tab's: a gist asked while Threads is hidden still fills its row.
     gistRoom = Math.max(30, cols - (REDO_W + 3) - (testsWOf(o) + 3) - (TIME_W + 3) - 4)
+    drawnNow = d.now
     const now = byId(o, o.current)
     const over = o.threads.filter(isOver).length
     const isOpen = b.mode === 'expanded' || b.mode === 'compact'
@@ -361,7 +362,8 @@ export const register: Register = (on, options) => {
 
     // Push, not overlay: an absolute Box with a negative top is clipped to the band, so it cannot paint over the chat.
     const rule = <Text dimColor wrap="truncate-end">{'─'.repeat(cols)}</Text>
-    const main = b.mode === 'compact' ? <Box flexDirection="column">{brief(els, d, act, cols, off, mRows)}</Box> : body(els, d, act, cap, cols, b.all ? 0 : off)
+    // M keeps its full height on every tab, however few rows there are: switching tabs or a new row moves nothing.
+    const main = b.mode === 'compact' ? <Box flexDirection="column" height={mRows}>{brief(els, d, act, cols, off, mRows)}</Box> : body(els, d, act, cap, cols, b.all ? 0 : off)
     return stack(<Box flexDirection="column" width={width}>{row}{rule}{main}</Box>)
   }).catch(($, e, next) => next(e))
 
@@ -587,11 +589,20 @@ async function redo($: EngineInterface, text: string): Promise<void> {
 /** Prompts summarized at load, newest first: the rows most likely in view. */
 const LOAD_SUMS = 20
 
-/** The tail of this session's transcript file (the last 4 MB, the read limit), or '' when it cannot be read. */
+/**
+ * This session's transcript file cut to what transcriptTimes reads: each user line's type, timestamp, text (first
+ * 1000 chars) and tool_use_ids. A long session's file is 20-100 MB, far past the 4 MiB a run returns; cut this way
+ * it is about 1/300 of that (23 MB to 73 KB in 0.2 s), so every prompt gets its time. No jq: the file's last 4 MB.
+ */
+const TIMES_JQ = 'fromjson? | select(.type == "user" and (.isMeta | not)) | {type, timestamp, message: {content: (.message.content'
+  + ' | if type == "string" then .[0:1000] elif type == "array" then map(if .type == "tool_result" then {type, tool_use_id}'
+  + ' elif .type == "text" then {type, text: .text[0:1000]} else empty end) else null end)}}'
 async function transcriptTail($: EngineInterface, cwd: string): Promise<string> {
   // shortcut: assumes ~/.claude (no CLAUDE_CONFIG_DIR); read it if the band shows no times there.
   const file = `${await $.env.get('HOME')}/.claude/projects/${cwd.replace(/[^A-Za-z0-9]/g, '-')}/${await $.session.id()}.jsonl`
-  const r = await $.process.run(['tail', '-c', '4000000', file], { timeoutMs: 5000 })
+  // The last 4 MB of the output, so a huge one keeps its newest lines (a run drops the end, not the start).
+  const sh = 'if command -v jq >/dev/null; then jq -cR "$1" "$2" | tail -c 4000000; else tail -c 4000000 "$2"; fi'
+  const r = await $.process.run(['sh', '-c', sh, 'sh', TIMES_JQ, file], { timeoutMs: 15_000 })
   return r.exitCode === 0 ? r.stdout : ''
 }
 
@@ -715,9 +726,11 @@ const testsWOf = (o: Observed) => Math.max(TESTS_W, ...o.log.filter(a => a.kind 
 
 /** The refresh column's width: " ↻ ". */
 const REDO_W = 3
-/** The time column's width: "23:59". */
-const TIME_W = 5
-const clock = (at: number) => sentLabel(at).slice(5)
+/** The time column's width: "23:59, 12d". */
+const TIME_W = 10
+// shortcut: the clock at the last draw, so a row needs no `now` passed down; per session if bands multiply, like gistRoom.
+let drawnNow = 0
+const clock = (at: number) => `${sentLabel(at).slice(5)}, ${daysAgo(at, drawnNow || at)}d`
 /** The column separator: much fainter than dim, barely there on the dark background. */
 const FAINT = '#3a3a3a'
 
