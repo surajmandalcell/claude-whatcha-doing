@@ -25,8 +25,8 @@ All looks are settled. Nothing is open.
   the band moves it a row a tick (`ui.scroll`, the engine's own window stays put). An arrow that cannot
   move is dim. The band opens on the newest rows, so new events stay in view; a size or tab change goes
   back there. Threads never ends in "+N more": every row is reachable by scrolling.
-- **Layout**: every Threads row, thread rows and sub rows alike, keeps 2 columns at the right: tests ┊
-  time. Each is a fixed-width box that never shrinks; the text box grows and shrinks (`minWidth 0`) and is
+- **Layout**: every Threads row, thread rows and sub rows alike, keeps 3 columns at the right: refresh ┊
+  tests ┊ time. Each is a fixed-width box that never shrinks; the text box grows and shrinks (`minWidth 0`) and is
   cut with "…" at the first ┊, so no text runs into or under the columns, every ┊ sits in the same place
   top to bottom, and every row is exactly one line.
 - **Full width**: titles, test runs, commits and errors are kept up to 200 characters, so every row is cut
@@ -37,7 +37,7 @@ All looks are settled. Nothing is open.
   the band goes back.
 - **Status row** (S, and the header of M and L): `▸ Now (X/N): <latest prompt>  │ tabs`, X of N threads
   done; the glyph is the thread's own, as in the Threads tab. 🤖: the latest prompt's 3-6 word on-device brief
-  (else its gist), a dim `processing…` while the model writes it or waits to retry; 👤 or no gist: the latest prompt, cleaned. It uses all the room up to a dim │ before the tabs, the three sizes and `▾` on the right, and is cut
+  (else its gist), the same spinner line as its `›` row while the model writes it or waits to retry; 👤 or no gist: the latest prompt, cleaned. It uses all the room up to a dim │ before the tabs, the three sizes and `▾` on the right, and is cut
   only at that edge. Under 120 columns the buttons take a second row.
 - **Header**: after the │, left to right with no gaps: ` Threads `` Summary `` Artifacts ` ┊ ` S `` M ``
   L ` ┊ ` 🤖 ` ┊ ` ⤒ `` ▲ `` ▼ `` ⤓ ` ` ▾ `. Each label has 1 space each side; the ┊ dividers are `#3a3a3a`.
@@ -54,39 +54,44 @@ All looks are settled. Nothing is open.
   top like the chat: finished ones, then open ones, the current one last, oldest first in each group. Every thread is expanded,
   and every task and plan step has its own row. Indents show the hierarchy:
   1. col 0: the head, `▸` now (accent), `✓` done, `✗` a stuck task, `⏸` paused (the same glyphs in S, M
-     and L); the name in bold, taking all the width up to the first ┊. Then the 2 **columns**, on every
-     row of the timeline, right-aligned:
-     - tests: `18 ✓ Pass` in green when every test passed, `3 ✗ Fail` in red when every test failed, and
+     and L); the name in bold, taking all the width up to the first ┊. Then the 3 **columns**, on every
+     row of the timeline:
+     - refresh, 3 wide: the thread row and every `›` row hold a plain dim ` ↻ ` button; other rows leave
+       it blank. A press asks the model for that prompt's gist again, with the chat's 3 earlier prompts as
+       context (each its gist, else its text cut to 200 chars), the same checks, the spinner meanwhile. The
+       new gist replaces the old one (and the thread's when the prompt opened it); a failed redo keeps the old.
+     - tests, right-aligned: `18 ✓ Pass` in green when every test passed, `3 ✗ Fail` in red when every test failed, and
        the compact `18✓ 1✗` (pass green, fail red) when both; 1000 and up reads `1.2k`. The column grows to
        its widest cell (at least 9), the same on every row.
-       Empty with no run, or a run with no count read. A thread row shows its last run; a test sub row its own.
-       On the thread row and every `›` row an empty cell holds a plain dim ` TL;DR ` button, right-aligned:
-       a press asks the model for that prompt's gist again, with the chat's 3 earlier prompts as context
-       (each its gist, else its text cut to 200 chars), the same checks, `processing…` meanwhile. The new
-       gist replaces the old one (and the thread's when the prompt opened it); a failed redo keeps the old.
-     - time: `10:42`, dim. A thread row shows when the owner last sent it a prompt (`sentAt`); each sub row
-       when it happened (an edit, a commit, a test run, a helper finishing, a later prompt), so the
-       column fills top to bottom. Live, times come from `prompt.submit` and `tool.call`; rebuilt threads
+       Empty with no run, or a run with no count read. Only the thread row shows a count: its last run.
+     - time: `10:42`, dim. A thread row shows when the owner last sent it a prompt (`sentAt`); a `›` row
+       when it was sent; a result line when the turn's last work happened (an edit, a commit, a test run,
+       a helper finishing). Live, times come from `prompt.submit` and `tool.call`; rebuilt threads
        take them from the `timestamp` of each line in the session's transcript file
        (`~/.claude/projects/<cwd>/<session id>.jsonl`, its last 4 MB): the prompt's line, and each tool
        result's line by its `tool_use_id`.
      A ` ┊ ` in `#3a3a3a`, much fainter than dim, separates the columns. No model;
   2. col 2: `Plan · N steps`; only the current thread's plan unfolds at col 4: section headings bold and
      dim, items under them at col 6 with their own number (`1.`) or `·`, each nested level 2 deeper;
-  3. col 2: each task, `✓` done (dim), `●` running, `○` to do, `✗` stuck; its subject only. A thread with
-     no tasks shows its last 3 things done instead, in words, never code, a command or a file name:
-     `✎ Edited N files` for each run of edits in a row, `✓ Tests passed` / `✗ Tests failed`,
-     `◆ Committed: <message>` (the `-m` or heredoc message only), `↳ <helper description>`; their time
-     and counts in the columns. A thread opened by an edit is named `Edited files`;
-  4. col 2: each later prompt to the thread, `› <gist>` (the last 3), shown at `prompt.submit`: a dim
-     `processing…` until its gist lands, then the gist, else the prompt. Only the newest prompt of the whole timeline
-     takes 2 rows, wrapped inside the left area, cut with "…" at the end of the second. Every older prompt
-     is one row, cut at the ┊.
-     Done rows and prompt rows sort by time together, oldest first; a row with no time keeps its place;
+  3. col 2: each task, `✓` done (dim), `●` running, `○` to do, `✗` stuck; its subject only. A thread
+     opened by an edit is named `Edited files`;
+  4. col 2: each later prompt to the thread, `› <gist>` (the last 3), shown at `prompt.submit`. While the
+     model sums it up: `⠹ summarizing…` in Claude blue (`claude`), after a miss `⠹ retrying, try N of 3`
+     (`warning`), then the prompt as typed, dim, on the same row; the spinner turns every 120 ms, only
+     while some prompt waits. Then the gist, else the prompt. Only the newest prompt of the whole timeline
+     takes 2 rows, wrapped inside the left area, cut with "…" at the end of the second; while it waits,
+     the spinner line, then the prompt as typed, dim. Every older prompt is one row, cut at the ┊.
+     **Turns**: prompts sent before Claude replies stack as `›` rows. When Claude replies (`turn.complete`
+     with an answer; in a rebuild, the next prompt), one dim result line goes under the stack at col 4:
+     `⎿ 18 tests passed · 3 files changed · 1 commit · 1 helper started`, counting the work since the first
+     prompt of the turn, in words, never a command or a path. The last test run is green (`N tests
+     passed`) or red (`N tests failed`); parts with nothing to count drop; no work, no line. The reply is
+     a `reply` log entry, so a rebuild draws the same rows;
   5. col 2: `❯ <activeForm>…` of the running task (accent), word for word from TaskCreate or TodoWrite,
      the lowest row, like the chat's spinner.
   The first prompt has no row: the thread's name and time point back to it.
-  **Jump**: the thread name and each `›` prompt are plain buttons. A press scrolls the chat to that prompt
+  **Jump**: the thread name and each `›` prompt are plain buttons, with no mark at rest; under the pointer
+  the text turns the accent color (`suggestion`), underlined. A press scrolls the chat to that prompt
   (`$.ui.scroll({ to: { requestId }, block: 'start' })`), by the `requestId` a passive
   `ui.render` hook on `UserMessage` saw for the prompt's first 60 chars. Not drawn yet, or denied: the
   toast "That prompt is not drawn in the chat yet".
@@ -106,7 +111,7 @@ All looks are settled. Nothing is open.
   the model's 4096 tokens, about 8 s), never skipped. A reply under 3 or over 9 words (never cut), ending
   on a dangling word, or that only repeats the prompt's opening words is dropped, and the model is asked
   once more for 3 to 5 words. When both replies are dropped, `gist` is `''` and the prompt shows.
-  No answer at all (a helper error or timeout) keeps the prompt `processing…` and asks again in the
+  No answer at all (a helper error or timeout) shows `retrying, try N of 3` and asks again in the
   background after 5 s, 20 s and 60 s, never blocking other prompts; after the third miss `gist` is `''`
   with `failed: true`, and the next session asks those again first (inside the 20 load asks).
   The reply is stored as `gist` on the prompt's log entry (and on its thread when it opened it), and the

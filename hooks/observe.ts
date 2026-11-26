@@ -207,6 +207,8 @@ export function onArtifact(rows: ArtifactRow[], url: string, title: string, at: 
 export function onTurnEnd(o: Observed, isAnswered: boolean): Observed {
   const now = cur(o)
   if (!now || !isAnswered) return o
+  // The reply closes the prompts before it: the band draws their result line under them.
+  if (o.log.at(-1)?.kind !== 'reply') o = log(o, 'reply', '')
   o = clearErrors(o)
   const since = o.log.slice(o.log.findLastIndex(a => a.kind === 'prompt' || a.kind === 'return') + 1)
   const isOpen = !!since.findLast(a => a.kind === 'test')?.text.startsWith('tests fail') || now.todos.some(t => t.status !== 'completed')
@@ -493,10 +495,12 @@ export const demoObserved = (now: number): Observed => ({
     { kind: 'edit', text: 'test/tax.test.ts', thread: 1 },
     { kind: 'prompt', text: 'why is CI red?', thread: 2 },
     { kind: 'agent', text: 'helper: read the CI logs', thread: 2 },
+    { kind: 'reply', text: '', thread: 2 },
     { kind: 'prompt', text: 'bump Node 20 to 22 in CI', thread: 3 },
     { kind: 'edit', text: 'workflows/ci.yml', thread: 3 },
     { kind: 'edit', text: '.nvmrc', thread: 3 },
     { kind: 'commit', text: 'commit: Use Node 22 in CI', thread: 3 },
+    { kind: 'reply', text: '', thread: 3 },
     { kind: 'return', text: 'back to Fix checkout tax rounding', thread: 1 },
     { kind: 'edit', text: 'test/receipt.test.ts', thread: 1 },
     { kind: 'test', text: 'tests fail: npm test: 11 pass, 1 fail', thread: 1 },

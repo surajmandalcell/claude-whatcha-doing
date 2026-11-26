@@ -34,7 +34,7 @@ You keep many Claude Code tabs open, and they often do similar jobs. After a whi
 
 ---
 
-**Threads** is the main tab, shown in the cover above. Your prompts form a timeline of threads, newest at the bottom. Under each one are Claude's tasks, plan steps and recent work. Two columns on the right show the tests (`18 ✓ Pass`, `4✓ 1✗`) and the time of each row.
+**Threads** is the main tab, shown in the cover above. Your prompts form a timeline of threads, newest at the bottom. Under each one are Claude's tasks, plan steps and your later prompts, and after each reply one dim line says what the turn did (`⎿ 18 tests passed · 3 files changed · 1 commit`). Three columns on the right hold ↻ (sum up that prompt again), the tests (`18 ✓ Pass`, `4✓ 1✗`) and the time of each row.
 
 ---
 

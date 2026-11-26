@@ -29,7 +29,8 @@ export type Thread = {
   sentAt?: number
 }
 export type Activity = {
-  kind: 'prompt' | 'return' | 'edit' | 'test' | 'error' | 'agent' | 'todo' | 'commit'
+  /** reply: Claude's answer ended the turn; the prompts before it get their result line. */
+  kind: 'prompt' | 'return' | 'edit' | 'test' | 'error' | 'agent' | 'todo' | 'commit' | 'reply'
   text: string
   thread: number
   /** A prompt's 4-8 word gist by the on-device model, shown in its place unless the band shows raw prompts; '' when the model gave none. */

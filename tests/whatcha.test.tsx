@@ -153,19 +153,20 @@ test('band: one status row; Threads shows each thread with its tasks and plan, o
   const body = timeline(await ui.drawn())
   expect(heads(body)).toEqual(['✓ Why is CI red?', '✓ Bump Node 20 to 22 in CI', '✗ Fix checkout tax rounding', '▸ Show tax on each cart line'])
   // Thread > task > plan step: every task and every step on its own row, one indent level each.
-  expect(body.slice(0, 9)).toEqual([
-    expect.stringMatching(/^✓ Why is CI red\? +┊ {11}┊ \d+:\d\d$/), // finished threads first; an empty tests cell with no run
-    '  ↳ read the CI logs', // no tasks: its last work instead
-    expect.stringMatching(/^✓ Bump Node 20 to 22 in CI +┊ {11}┊ \d+:\d\d$/),
+  expect(body.slice(0, 10)).toEqual([
+    expect.stringMatching(/^✓ Why is CI red\? +┊  ↻  ┊ {11}┊ \d+:\d\d$/), // finished threads first; ↻, then an empty tests cell with no run
+    '    ⎿ 1 helper started', // Claude replied: the turn's result line, in words
+    expect.stringMatching(/^✓ Bump Node 20 to 22 in CI +┊  ↻  ┊ {11}┊ \d+:\d\d$/),
     '  ✓ Use Node 22 in the CI workflow',
-    expect.stringMatching(/^✗ Fix checkout tax rounding +┊    11✓ 1✗ ┊ \d+:\d\d$/), // passes and fails: the compact "11✓ 1✗"
+    '    ⎿ 2 files changed · 1 commit',
+    expect.stringMatching(/^✗ Fix checkout tax rounding +┊  ↻  ┊    11✓ 1✗ ┊ \d+:\d\d$/), // passes and fails: the compact "11✓ 1✗"
     '  ✓ Round tax per line to the cent',
     '  ● Fix the two failing tax tests',
     '  ✗ Update the receipt snapshot',
     '  ❯ Fixing the two failing tax tests…',
   ])
-  expect(body.slice(9)).toEqual([
-    expect.stringMatching(/^▸ Show tax on each cart line {20,}┊ {11}┊ \d+:\d\d$/),
+  expect(body.slice(10)).toEqual([
+    expect.stringMatching(/^▸ Show tax on each cart line {20,}┊  ↻  ┊ {11}┊ \d+:\d\d$/),
     '  Plan · 4 steps',
     '    Steps',
     '      1. Add a Tax column to CartTable.ts',
@@ -268,7 +269,7 @@ test('sizes: S is the one row, M the 6 most useful lines of the tab, L up to 20%
   expect(m).toHaveLength(8)
   // Opens on the newest: the current thread's head pinned on top, its latest prompt and running line lowest.
   expect(subText(m.slice(2))).toEqual([
-    expect.stringMatching(/^▸ Show tax on each cart line {20,}┊ +┊ \d+:\d\d$/),
+    expect.stringMatching(/^▸ Show tax on each cart line {20,}┊  ↻  ┊ +┊ \d+:\d\d$/),
     '  ● Add a tax column to CartTable',
     '  ○ Format it with formatMoney',
     '  ○ Add a cart table test',
@@ -509,7 +510,8 @@ test('Replay: every prompt lands as a thread, tangent, nested step or return, an
     '✓ Bump node in the CI workflow to 22',
     '▸ Write short release notes for 0.4.0 in CHANGELOG.md',
   ])
-  expect(list).toContainEqual(expect.stringMatching(/^✓ Add a dark mode option .*… ┊  2 ✓ Pass ┊ \d+:\d\d$/))
+  expect(list).toContainEqual(expect.stringMatching(/^✓ Add a dark mode option .*… ┊  ↻  ┊  2 ✓ Pass ┊ \d+:\d\d$/))
+  expect(list).toContain('    ⎿ 2 tests passed') // each reply: its turn's result line
 
   await ui.press({ key: 'tab-summary' })
   const sent = m.sent()
@@ -546,7 +548,7 @@ test('plan parsing: numbered and bulleted items with nesting and headings; wrapp
   const ui = await $.ui.mount(BAND(120, 155))
   await ui.press({ key: 'tab-threads' })
   const left = timeline(await ui.drawn())
-  expect(left[0]).toMatch(/^▸ Customer has a checkout issue +┊ +TL;DR +┊ \d+:\d\d$/)
+  expect(left[0]).toMatch(/^▸ Customer has a checkout issue +┊  ↻  ┊ +┊ \d+:\d\d$/)
   expect(left!.slice(1, 5)).toEqual(['  Plan · 5 steps', '    Steps', '      1. Reproduce on the live site', '      2. Confirm which store production uses'])
   expect(left).toContain('          1. live, not test')
   await ui.unmount()
@@ -581,12 +583,12 @@ test('thread name: the owner\'s first prompt, cleaned; the on-device name only f
   // The thread row ends with the local clock time the prompt was sent, from the prompt.submit stamp.
   const ui = await $.ui.mount(BAND())
   await ui.press({ key: 'tab-threads' })
-  expect(timeline(await ui.drawn())[0]).toMatch(/^▸ Checkout timeout at Razorpay +┊ +TL;DR +┊ \d+:\d\d$/)
+  expect(timeline(await ui.drawn())[0]).toMatch(/^▸ Checkout timeout at Razorpay +┊  ↻  ┊ +┊ \d+:\d\d$/)
   // 👤 flips every row to the prompt as typed, 🤖 back to the gist.
   await ui.press({ key: 'raw' })
   expect(flat(await ui.drawn())).toContain('[ 👤 ]')
   expect(flat(await ui.drawn())).toContain(`Now (0/1): ${said}`)
-  expect(timeline(await ui.drawn())[0]).toMatch(new RegExp(`^▸ ${said} +┊ +TL;DR +┊ \\d+:\\d\\d$`))
+  expect(timeline(await ui.drawn())[0]).toMatch(new RegExp(`^▸ ${said} +┊  ↻  ┊ +┊ \\d+:\\d\\d$`))
   await ui.press({ key: 'raw' })
   expect(flat(await ui.drawn())).toContain('[ 🤖 ]')
   expect([sentLabel(new Date(2026, 0, 1, 10, 42).getTime()), sentLabel(new Date(2026, 0, 1, 9, 5).getTime())]).toEqual(['sent 10:42', 'sent 9:05'])
@@ -652,9 +654,9 @@ test('a new long prompt gets its gist with no toggle: "…" while the model runs
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await prompt('fix the gist band for new prompts')
   await prompt(dictated)
-  // Before the model answers: a dim "…" on the newest prompt row and the status row, never an old value.
-  expect((await draw(150, 'size-compact')).at(-1)).toMatch(/^  › processing…/)
-  expect((await draw(100))[0]).toMatch(/^▸ Now \(0\/1\): processing…$/)
+  // Before the model answers: the spinner line, then the prompt as typed (dim), and the spinner on the status row.
+  expect((await draw(150, 'size-compact')).slice(-2)).toEqual([expect.stringMatching(/^  › \S summarizing… +┊/), expect.stringMatching(/^    The gist band often shows nothing/)])
+  expect((await draw(100))[0]).toMatch(/^▸ Now \(0\/1\): \S summarizing…$/)
   open()
   await settle()
   // The answer lands and redraws with no click: 4000 chars of the 5000 sent, cut, never skipped.
@@ -702,33 +704,43 @@ test('a new topic opens a new thread, and a fragment like "Where are these" is n
     .toEqual(['Rule files I mean', undefined, 'Graph rule for references'])
 })
 
-test('live: a later prompt gets its own row at once, and a thread with no tasks shows its last work', async ($, on) => {
-  engine(on)
+test('turns: prompts sent while Claude works stack; one result line after the reply, none before', async ($, on) => {
+  engine(on, e => (String(e.command ?? '').includes('npm test') ? '# pass 18\n# fail 0' : 'ok'))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const prompt = (text: string) => $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } } as never)
+  const reply = () => $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
   await prompt('[Image #1] here reduce padding, its too much on the icon tiles')
-  const ui = await $.ui.mount(BAND(120))
+  const ui = await $.ui.mount(BAND(120, 155))
   await ui.press({ key: 'tab-threads' })
   await ui.press({ key: 'size-compact' })
   // Picks pasted from an options page: same thread, its own row right away, before Claude does anything.
   await prompt('- Exact: 1 Yellow on blue tile\n- Colors: 1 Yellow with dark outline\n- Morphed: No pick')
   expect(timeline(await ui.drawn())).toEqual([
-    expect.stringMatching(/^▸ Here reduce padding, its too much on the icon tiles +┊ +TL;DR +┊ \d+:\d\d$/),
+    expect.stringMatching(/^▸ Here reduce padding, its too much on the icon tiles +┊  ↻  ┊ +┊ \d+:\d\d$/),
     expect.stringMatching(/^  › Exact: 1 Yellow on blue tile - Colors: .* Morphed: No pick$/),
   ])
-  await $.tool.call({ tool: 'Bash', command: 'ls specs' } as never)
   await $.tool.call({ tool: 'Edit', file_path: '/w/spec/icons.md', old_string: 'a', new_string: 'b' } as never)
   await $.tool.call({ tool: 'Edit', file_path: '/w/src/Tile.tsx', old_string: 'a', new_string: 'b' } as never)
-  const m = timeline(await ui.drawn())
-  // Rows sort by time; at the same time the work keeps its place before the prompt.
-  expect(m.slice(1)).toEqual(['  ✎ Edited 2 files', expect.stringMatching(/^  › Exact: /)])
-  expect(m.join('\n')).not.toContain('[Image')
+  await $.tool.call({ tool: 'Bash', command: 'npm test' } as never)
+  await prompt('and keep the tile corners round') // sent mid-work: it stacks, and no result line yet
+  const stacked = [expect.stringMatching(/^  › Exact: /), '  › And keep the tile corners round']
+  expect(timeline(await ui.drawn()).slice(1)).toEqual(stacked)
+  await $.tool.call({ tool: 'Bash', command: 'git commit -m "Round the tiles"' } as never)
+  await reply()
+  // One line under the stack, for all the work since the first prompt; no command or path in it.
+  const after = timeline(await ui.drawn())
+  expect(after.slice(1)).toEqual([...stacked, '    ⎿ 18 tests passed · 2 files changed · 1 commit'])
+  console.log(['', 'Threads, M, 150 columns, stacked prompts and the result line:', ...screen(await ui.drawn(), 150)].join('\n'))
+  expect(after.join('\n')).not.toMatch(/\[Image|icons\.md|Tile\.tsx|npm|git/)
+  // A new prompt after the reply starts a new turn: its row, and no line until Claude replies again.
+  await prompt('now the dark tile')
+  expect(timeline(await ui.drawn()).slice(-2)).toEqual(['    ⎿ 18 tests passed · 2 files changed · 1 commit', '  › Now the dark tile'])
   await ui.unmount()
   // An on-device reply cut to 6 words ends mid-clause: not a name.
   expect([threadName('[Image #1] here reduce padding, its'), threadName('here reduce padding on tiles')]).toEqual([undefined, 'Here reduce padding on tiles'])
 })
 
-test('work rows show no code or files: a test run reads "Tests passed", a run of edits "Edited N files", a heredoc commit its message', async ($, on) => {
+test('the result line shows no code or files: "4 tests passed · 2 files changed · 1 commit", even for a heredoc commit', async ($, on) => {
   engine(on, e => (String(e.command ?? '').includes('swift test') ? '# pass 4\n# fail 0' : 'ok'))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.prompt.submit({ text: 'make the toy kit tests pass', wait: false, origin: { kind: 'composer' } } as never)
@@ -736,15 +748,16 @@ test('work rows show no code or files: a test run reads "Tests passed", a run of
   await $.tool.call({ tool: 'Write', file_path: '/w/Tests/NetToysKitTests/KitTests.swift', content: 'x' } as never)
   await $.tool.call({ tool: 'Bash', command: "python3 - <<'EOF'\np='Tests/NetToysKitTests/KitTests.swift'\nEOF\nswift test" } as never)
   await $.tool.call({ tool: 'Bash', command: "git commit -m \"$(cat <<'EOF'\nFix the kit tests\n\nBody.\nEOF\n)\"" } as never)
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
   const ui = await $.ui.mount(BAND(120))
   await ui.press({ key: 'tab-threads' })
   const rows = timeline(await ui.drawn()).slice(1)
-  expect(rows).toEqual(['  ✎ Edited 2 files', '  ✓ Tests passed', '  ◆ Committed: Fix the kit tests'])
+  expect(rows).toEqual(['    ⎿ 4 tests passed · 2 files changed · 1 commit'])
   expect(rows.join('\n')).not.toMatch(/index\.html|NetToys|python3|EOF|<</)
   await ui.unmount()
 })
 
-test('no answer: "processing…", asked again after 5 s; 3 misses show the prompt; TL;DR asks with earlier prompts; a press on a prompt not drawn in the chat says so', async ($, on) => {
+test('no answer: the spinner, "retrying, try 1 of 3" after a miss, asked again after 5 s; 3 misses show the prompt; ↻ asks with earlier prompts; a press on a prompt not drawn in the chat says so', async ($, on) => {
   const m = engine(on)
   let misses = 1
   const asked: string[] = []
@@ -767,34 +780,36 @@ test('no answer: "processing…", asked again after 5 s; 3 misses show the promp
   resetOnDevice()
   const settle = () => new Promise(r => setTimeout(r, 20))
   const prompt = (text: string) => $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } } as never)
-  const last = async () => {
+  const lastRows = async (n: number) => {
     const ui = await $.ui.mount(BAND(50, 155))
     await ui.press({ key: 'size-compact' })
     await ui.press({ key: 'tab-threads' })
-    const s = subText(screen(await ui.drawn(), 150).filter(Boolean)).at(-1)
+    const s = subText(screen(await ui.drawn(), 150).filter(Boolean)).slice(-n)
     await ui.unmount()
     return s
   }
+  const last = async () => (await lastRows(1))[0]
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await prompt('fix the band please')
   const long = 'the band gist sometimes never shows up for a prompt and stays raw, find out why and retry it'
   await prompt(long)
   await settle()
-  expect(await last()).toBe('  › processing…')
+  // A miss: the spinner says which try, then the prompt as typed (dim) on the row under it.
+  expect(await lastRows(2)).toEqual([expect.stringMatching(/^  › \S retrying, try 1 of 3$/), '    The band gist sometimes never shows up for a prompt and stays raw, find out why and retry it'])
   await m.clock.advance(5_000)
   await settle()
   expect(await last()).toBe('  › Fix the band gist retry')
-  // TL;DR: the same prompt again, with the chat's earlier prompts before it.
+  // ↻: the same prompt again, with the chat's earlier prompts before it.
   const ui = await $.ui.mount(BAND(50, 155))
   await ui.press({ key: 'tab-threads' })
-  await ui.press({ key: 'tldr-1' })
+  await ui.press({ key: 'redo-1' })
   await settle()
   expect(asked.at(-1)).toBe('Earlier prompts in this chat: "Fix the band please". The request: ' + long)
   expect(await last()).toBe('  › Retry gists with chat context')
   await ui.press({ key: 'jump-0' })
   expect(toasts).toEqual(['That prompt is not drawn in the chat yet'])
   await ui.unmount()
-  // Three more misses after the first: the prompt shows as typed, never "processing…" for good.
+  // Three more misses after the first: the prompt shows as typed, never the spinner for good.
   misses = 4
   await prompt('and when the band helper never answers at all, show the prompt itself after the retries')
   for (const ms of [0, 5_000, 20_000, 60_000]) { await m.clock.advance(ms); await settle() }
@@ -823,20 +838,20 @@ test('long names: every ┊ stays in its column and every row is one line, at 15
     const list = screen(body, cols)
     if (cols === 150) console.log(['', 'Threads tab, L, 150 columns, long names:', ...screen(await ui.drawn(), 150)].join('\n'))
     expect(list).toHaveLength(body.children.length) // one line per row: no cell wrapped
-    // Both columns sit on every row, thread rows and sub rows alike, so every ┊ is in the same place top to bottom.
+    // The 3 columns sit on every row, thread rows and sub rows alike, so every ┊ is in the same place top to bottom.
     expect(new Set(list.map(bars)).size).toBe(1)
     expect(list.every(l => [...l].length <= cols)).toBe(true)
     const heads = list.filter(l => /^\S/.test(l))
     expect(heads).toHaveLength(2)
-    expect(heads[0]).toMatch(/… ┊ +TL;DR +┊ \d+:\d\d$/)
-    expect(heads[1]).toMatch(/… ┊   88✓ 12✗ ┊ \d+:\d\d$/)
-    // Sub rows put their time, and a test run its counts, in the columns, never in the text.
-    expect(list).toContainEqual(expect.stringMatching(/^  ◆ Committed: c11 +┊ {11}┊ \d+:\d\d$/))
-    expect(list).toContainEqual(expect.stringMatching(/^  ✗ Tests failed +┊   88✓ 12✗ ┊ \d+:\d\d$/))
+    expect(heads[0]).toMatch(/… ┊  ↻  ┊ {11}┊ \d+:\d\d$/)
+    expect(heads[1]).toMatch(/… ┊  ↻  ┊   88✓ 12✗ ┊ \d+:\d\d$/)
+    // Claude replied to the first thread: its result line, the time in the column. The second has no reply yet.
+    expect(list).toContainEqual(expect.stringMatching(/^    ⎿ 3 files changed · 5 commits +┊     ┊ {11}┊ \d+:\d\d$/))
+    expect(list.filter(l => l.includes('⎿'))).toHaveLength(1)
     // The 2-line prompt wraps inside the left area: its second row ends before the first ┊ too.
     const p = list.findIndex(l => l.startsWith('  › And make the index file'))
-    expect(list[p]).toMatch(/ ┊ +TL;DR +┊ \d+:\d\d$/)
-    expect(list[p + 1]).toMatch(/^    \S.* +┊ {11}┊$/)
+    expect(list[p]).toMatch(/ ┊  ↻  ┊ {11}┊ \d+:\d\d$/)
+    expect(list[p + 1]).toMatch(/^    \S.* +┊     ┊ {11}┊$/)
     await ui.unmount()
   }
 })
@@ -849,7 +864,7 @@ test('test counts: "18 ✓ Pass" when all pass, "3 ✗ Fail" when all fail, "18�
   expect([testCell('npm test'), testCell('npm test: 0 pass, 0 fail')]).toEqual([[], []])
 })
 
-test('older prompts: one line, the on-device gist or the cut prompt, in M and L; only the newest gets 2; sub rows in time order', async ($, on) => {
+test('older prompts: one line, the on-device gist or the cut prompt, in M and L; only the newest gets 2; with no reply yet the prompts stack, no result line', async ($, on) => {
   const m = engine(on, e => (String(e.command ?? '').includes('test') ? '# pass 4\n# fail 0' : 'ok'))
   let reply = 'Auto-update the index on rule changes.'
   on('fs.read', () => ({ value: 'swift source' }))
@@ -885,23 +900,20 @@ test('older prompts: one line, the on-device gist or the cut prompt, in M and L;
   const rows = subText(list)
   // L: the thread name is the gist of its long first prompt, on one row.
   expect(nameCol(rows[0]!)).toBe('▸ Index global rule references per project')
-  expect(rows.slice(1, 5)).toEqual([
+  expect(rows.slice(1, 3)).toEqual([
     '  › Auto-update the index on rule changes', // an older prompt: its gist, one row
-    '  ✓ Tests passed',
     expect.stringMatching(/^  › And make the index file update itself every time .*…$/), // a bad gist: the cut prompt
-    '  ✎ Edited 1 file',
   ])
   // The newest prompt of the timeline is the only one on 2 rows.
-  expect(rows.slice(5)).toEqual([expect.stringMatching(/^  › One more thing: also list/), expect.stringMatching(/^    \S/)])
-  expect(list[2]).toMatch(/┊  4 ✓ Pass ┊/) // green, alone: no fail count beside it
-  // Sub rows in time order, oldest first: prompts mixed in with work.
+  expect(rows.slice(3)).toEqual([expect.stringMatching(/^  › One more thing: also list/), expect.stringMatching(/^    \S/)])
+  expect(list[0]).toMatch(/┊  4 ✓ Pass ┊/) // green, alone: no fail count beside it
+  // Sub rows in time order, oldest first.
   const times = list.slice(1).map(l => l.match(/(\d+):(\d\d)$/)).filter(Boolean).map(x => +x![1]! * 60 + +x![2]!)
   expect(times).toEqual([...times].sort((a, b) => a - b))
-  // M: the same gists, 6 rows; ▲ shows the older prompt's gist.
+  // M: the same gists; the 5 rows fit, so no ▲.
   await ui.press({ key: 'size-compact' })
-  await ui.press({ key: 'up' })
   const mRows = subText(screen(bodyOf(await ui.drawn()), 120))
-  expect(mRows).toHaveLength(6)
+  expect(mRows).toHaveLength(5)
   expect(mRows.slice(0, 2).map(nameCol)).toEqual(['▸ Index global rule references per project', '  › Auto-update the index on rule changes'])
   ui.unmount()
 })
@@ -955,10 +967,10 @@ test('loaded mid-session, the band rebuilds the threads from the transcript', as
   await ui.press({ key: 'tab-threads' })
   const list = timeline(await ui.drawn())
   expect(heads(list)).toEqual(['✓ Fix the login redirect bug', '▸ Write the release notes'])
-  expect(list[0]).toMatch(/^✓ Fix the login redirect bug +┊ +TL;DR +┊  9:05$/)
-  expect(list.find(l => l.startsWith('▸'))).toMatch(/^▸ Write the release notes +┊ +TL;DR +┊  9:20$/)
-  // Each work row takes its tool result's time from the file: the commit came back at 9:08.
-  expect(screen(bodyOf(await ui.drawn()), 150)).toContainEqual(expect.stringMatching(/^  ◆ Committed: Fix redirect +┊ {11}┊  9:08$/))
+  expect(list[0]).toMatch(/^✓ Fix the login redirect bug +┊  ↻  ┊ +┊  9:05$/)
+  expect(list.find(l => l.startsWith('▸'))).toMatch(/^▸ Write the release notes +┊  ↻  ┊ +┊  9:20$/)
+  // The next prompt means Claude replied: the result line takes its last tool result's time from the file, 9:08.
+  expect(screen(bodyOf(await ui.drawn()), 150)).toContainEqual(expect.stringMatching(/^    ⎿ 1 file changed · 1 commit +┊     ┊ {11}┊  9:08$/))
   await ui.unmount()
 })
 
